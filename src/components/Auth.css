@@ -1,0 +1,637 @@
+/* =====================================================
+   PAGINA LOGIN / REGISTER
+===================================================== */
+
+.auth-page {
+  position: fixed;
+  inset: 0;
+
+  width: 100%;
+  height: 100vh;
+
+  overflow: hidden;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  font-family:
+    Arial,
+    Helvetica,
+    sans-serif;
+
+  background:
+    linear-gradient(
+      rgba(8, 13, 23, 0.38),
+      rgba(8, 12, 20, 0.52)
+    ),
+    url('../assets/auth-bg.png');
+
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+}
+
+
+/* =====================================================
+   STRAT UȘOR ÎNTUNECAT
+===================================================== */
+
+.auth-page::before {
+  content: '';
+
+  position: absolute;
+  inset: 0;
+
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(5, 9, 17, 0.05),
+      rgba(5, 9, 17, 0.18)
+    );
+
+  pointer-events: none;
+}
+
+
+/* =====================================================
+   TOT GRUPUL:
+   LOGO + TITLU + FORMULAR
+===================================================== */
+
+.auth-content {
+  position: relative;
+
+  z-index: 10;
+
+  width: 100%;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  transform: translateY(-20px);
+}
+
+
+/* =====================================================
+   LOGO
+===================================================== */
+
+.auth-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  gap: 8px;
+
+  margin-bottom: 13px;
+
+  color: #f1f1f1;
+
+  font-size: 34px;
+  font-weight: 500;
+
+  line-height: 1;
+
+  text-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.70);
+}
+
+
+.auth-logo-mountain,
+.auth-logo span {
+  font-size: 31px;
+
+  filter: grayscale(0.25);
+
+  opacity: 0.95;
+}
+
+
+/* =====================================================
+   LOGIN / REGISTER
+===================================================== */
+
+.auth-title {
+  margin:
+    0
+    0
+    17px;
+
+  color: #f4f4f4;
+
+  font-size: 27px;
+  font-weight: 700;
+
+  line-height: 1;
+
+  text-shadow:
+    0 2px 7px rgba(0, 0, 0, 0.75);
+}
+
+
+/* =====================================================
+   CARD ALB
+===================================================== */
+
+.auth-card {
+  width: 300px;
+
+  padding:
+    22px
+    25px
+    24px;
+
+  box-sizing: border-box;
+
+  background:
+    rgba(244, 247, 250, 0.97);
+
+  color: #222222;
+
+  border:
+    1px solid
+    rgba(190, 195, 201, 0.95);
+
+  border-radius: 6px;
+
+  box-shadow:
+    0 5px 18px rgba(0, 0, 0, 0.42);
+
+  backdrop-filter: blur(3px);
+}
+
+
+/* =====================================================
+   CÂMPURI
+===================================================== */
+
+.auth-field {
+  width: 100%;
+
+  margin-bottom: 15px;
+}
+
+
+.auth-field label {
+  display: block;
+
+  margin-bottom: 6px;
+
+  color: #282828;
+
+  font-size: 12px;
+  font-weight: 400;
+}
+
+
+/* =====================================================
+   INPUT
+===================================================== */
+
+.auth-field input {
+  width: 100%;
+  height: 38px;
+
+  padding: 0 10px;
+
+  box-sizing: border-box;
+
+  background: #edf0f3;
+
+  color: #222222;
+
+  border: 1px solid #979da4;
+  border-radius: 6px;
+
+  outline: none;
+
+  font-size: 12px;
+
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.06);
+
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+
+.auth-field input:focus {
+  border-color: #577fb6;
+
+  box-shadow:
+    0 0 0 2px rgba(78, 119, 174, 0.15);
+}
+
+
+/* =====================================================
+   LOGIN BUTTON
+===================================================== */
+
+.auth-login-button {
+  width: 100%;
+  height: 35px;
+
+  margin-top: 2px;
+
+  padding: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background:
+    linear-gradient(
+      to bottom,
+      #678fc5,
+      #4e76ad
+    );
+
+  color: white;
+
+  border: 1px solid #6882a4;
+  border-radius: 18px;
+
+  box-shadow:
+    0 2px 5px rgba(0, 0, 0, 0.25);
+
+  font-size: 12px;
+  font-weight: 500;
+
+  cursor: pointer;
+
+  transition:
+    transform 0.15s ease,
+    filter 0.15s ease;
+}
+
+
+.auth-login-button:hover {
+  filter: brightness(1.08);
+
+  transform: translateY(-1px);
+}
+
+
+/* =====================================================
+   REGISTER BUTTON
+===================================================== */
+
+.auth-register-button {
+  width: 100%;
+  height: 35px;
+
+  margin-top: 11px;
+
+  padding: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background:
+    linear-gradient(
+      to bottom,
+      #b7b7b7,
+      #9d9d9d
+    );
+
+  color: white;
+
+  border: 1px solid #aaaaaa;
+  border-radius: 18px;
+
+  box-shadow:
+    0 2px 5px rgba(0, 0, 0, 0.22);
+
+  font-size: 12px;
+  font-weight: 500;
+
+  cursor: pointer;
+
+  transition:
+    transform 0.15s ease,
+    filter 0.15s ease;
+}
+
+
+.auth-register-button:hover {
+  filter: brightness(1.08);
+
+  transform: translateY(-1px);
+}
+
+
+/* =====================================================
+   AM UITAT PAROLA
+===================================================== */
+
+.auth-forgot-button {
+  width: 100%;
+
+  margin-top: 15px;
+
+  padding: 0;
+
+  background: transparent;
+
+  color: #666666;
+
+  border: none;
+
+  text-align: center;
+  text-decoration: underline;
+
+  font-size: 11px;
+
+  cursor: pointer;
+}
+
+
+.auth-forgot-button:hover {
+  color: #222222;
+}
+
+
+/* =====================================================
+   DISABLED
+===================================================== */
+
+.auth-login-button:disabled,
+.auth-register-button:disabled,
+.auth-forgot-button:disabled {
+  opacity: 0.55;
+
+  cursor: not-allowed;
+
+  transform: none;
+}
+
+
+/* =====================================================
+   MESAJE
+===================================================== */
+
+.auth-message {
+  width: 100%;
+
+  box-sizing: border-box;
+
+  margin-bottom: 12px;
+
+  padding: 8px 9px;
+
+  border-radius: 5px;
+
+  font-size: 10px;
+
+  line-height: 1.4;
+}
+
+
+.auth-message.success {
+  background: #e4f2e7;
+
+  color: #347443;
+
+  border: 1px solid #b8d5be;
+}
+
+
+.auth-message.error {
+  background: #f6e3e3;
+
+  color: #a43636;
+
+  border: 1px solid #deb8b8;
+}
+
+
+/* =====================================================
+   STELUȚĂ
+===================================================== */
+
+.auth-decoration {
+  position: absolute;
+
+  right: 18px;
+  bottom: 15px;
+
+  z-index: 10;
+
+  color:
+    rgba(235, 235, 235, 0.60);
+
+  font-size: 18px;
+}
+
+
+/* =====================================================
+   TABLETĂ
+===================================================== */
+
+@media (max-width: 800px) {
+
+  .auth-logo {
+    font-size: 31px;
+  }
+
+
+  .auth-logo-mountain,
+  .auth-logo span {
+    font-size: 28px;
+  }
+
+
+  .auth-title {
+    font-size: 25px;
+  }
+
+
+  .auth-card {
+    width: 285px;
+  }
+
+}
+
+
+/* =====================================================
+   MOBIL
+===================================================== */
+
+@media (max-width: 600px) {
+
+  .auth-page {
+    background-position: center center;
+  }
+
+
+  .auth-content {
+    transform: translateY(-10px);
+  }
+
+
+  .auth-logo {
+    margin-bottom: 11px;
+
+    font-size: 28px;
+  }
+
+
+  .auth-logo-mountain,
+  .auth-logo span {
+    font-size: 25px;
+  }
+
+
+  .auth-title {
+    margin-bottom: 15px;
+
+    font-size: 23px;
+  }
+
+
+  .auth-card {
+    width:
+      min(
+        290px,
+        calc(100vw - 40px)
+      );
+
+    padding:
+      21px
+      23px
+      23px;
+  }
+
+
+  .auth-field label {
+    font-size: 12px;
+  }
+
+
+  .auth-field input {
+    height: 39px;
+
+    font-size: 13px;
+  }
+
+
+  .auth-login-button,
+  .auth-register-button {
+    height: 37px;
+
+    font-size: 12px;
+  }
+
+
+  .auth-forgot-button {
+    font-size: 11px;
+  }
+
+}
+
+
+/* =====================================================
+   TELEFOANE FOARTE MICI
+===================================================== */
+
+@media (max-width: 380px) {
+
+  .auth-logo {
+    font-size: 25px;
+  }
+
+
+  .auth-logo-mountain,
+  .auth-logo span {
+    font-size: 23px;
+  }
+
+
+  .auth-title {
+    font-size: 20px;
+  }
+
+
+  .auth-card {
+    width:
+      calc(100vw - 30px);
+
+    padding:
+      18px
+      20px
+      20px;
+  }
+
+}
+
+
+/* =====================================================
+   ECRANE SCUNDE
+===================================================== */
+
+@media (max-height: 550px) {
+
+  .auth-content {
+    transform: none;
+  }
+
+
+  .auth-logo {
+    margin-bottom: 7px;
+
+    font-size: 26px;
+  }
+
+
+  .auth-logo-mountain,
+  .auth-logo span {
+    font-size: 23px;
+  }
+
+
+  .auth-title {
+    margin-bottom: 10px;
+
+    font-size: 21px;
+  }
+
+
+  .auth-card {
+    padding:
+      15px
+      22px
+      16px;
+  }
+
+
+  .auth-field {
+    margin-bottom: 10px;
+  }
+
+
+  .auth-field input {
+    height: 31px;
+  }
+
+
+  .auth-login-button,
+  .auth-register-button {
+    height: 30px;
+  }
+
+
+  .auth-register-button {
+    margin-top: 7px;
+  }
+
+
+  .auth-forgot-button {
+    margin-top: 9px;
+  }
+
+}

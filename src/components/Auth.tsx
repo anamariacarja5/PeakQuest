@@ -1,44 +1,66 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import authBg from '../assets/auth-bg.png'
 
+import './Auth.css'
 
 function Auth() {
 
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [message, setMessage] = useState('')
+  const [email, setEmail] =
+    useState('')
 
-  // Devine true când userul intră
-  // din emailul de recuperare
-  const [resetMode, setResetMode] = useState(false)
+  const [password, setPassword] =
+    useState('')
 
-  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] =
+    useState('')
+
+  const [loading, setLoading] =
+    useState(false)
+
+  const [message, setMessage] =
+    useState('')
+
+  const [errorMessage, setErrorMessage] =
+    useState('')
+
+  const [resetMode, setResetMode] =
+    useState(false)
 
 
-  // Verificăm dacă utilizatorul a venit
-  // din linkul "Reset password"
+  // =====================================================
+  // DETECTĂM LINK-UL DE RESETARE PAROLĂ
+  // =====================================================
+
   useEffect(() => {
 
-    const { data } = supabase.auth.onAuthStateChange(
-      (event) => {
+    const {
+      data: {
+        subscription
+      }
+    } =
+      supabase.auth.onAuthStateChange(
+        (event) => {
 
-        if (event === 'PASSWORD_RECOVERY') {
+          if (
+            event === 'PASSWORD_RECOVERY'
+          ) {
 
-          setResetMode(true)
+            setResetMode(true)
 
-          setMessage(
-            'Introdu noua parolă.'
-          )
+            setMessage(
+              'Introdu parola nouă.'
+            )
+
+          }
 
         }
-
-      }
-    )
+      )
 
 
     return () => {
 
-      data.subscription.unsubscribe()
+      subscription.unsubscribe()
 
     }
 
@@ -46,53 +68,34 @@ function Auth() {
 
 
 
-  // REGISTER
-  async function register() {
+  // =====================================================
+  // CURĂȚARE MESAJE
+  // =====================================================
 
-    if (!email || !password) {
+  function clearMessages() {
 
-      setMessage(
-        'Completează emailul și parola.'
-      )
-
-      return
-
-    }
-
-
-    const { error } =
-      await supabase.auth.signUp({
-
-        email: email,
-        password: password
-
-      })
-
-
-    if (error) {
-
-      setMessage(error.message)
-
-    }
-
-    else {
-
-      setMessage(
-        'Cont creat! Verifică emailul dacă este necesar.'
-      )
-
-    }
+    setMessage('')
+    setErrorMessage('')
 
   }
 
 
 
+  // =====================================================
   // LOGIN
+  // =====================================================
+
   async function login() {
 
-    if (!email || !password) {
+    clearMessages()
 
-      setMessage(
+
+    if (
+      !email.trim() ||
+      !password
+    ) {
+
+      setErrorMessage(
         'Completează emailul și parola.'
       )
 
@@ -101,25 +104,29 @@ function Auth() {
     }
 
 
+    setLoading(true)
+
+
     const { error } =
-      await supabase.auth.signInWithPassword({
+      await supabase.auth
+        .signInWithPassword({
 
-        email: email,
-        password: password
+          email:
+            email.trim(),
 
-      })
+          password:
+            password
+
+        })
+
+
+    setLoading(false)
 
 
     if (error) {
 
-      setMessage(error.message)
-
-    }
-
-    else {
-
-      setMessage(
-        'Te-ai autentificat!'
+      setErrorMessage(
+        'Email sau parolă incorectă.'
       )
 
     }
@@ -128,12 +135,92 @@ function Auth() {
 
 
 
+  // =====================================================
+  // REGISTER
+  // =====================================================
+
+  async function register() {
+
+    clearMessages()
+
+
+    if (
+      !email.trim() ||
+      !password
+    ) {
+
+      setErrorMessage(
+        'Completează emailul și parola.'
+      )
+
+      return
+
+    }
+
+
+    if (
+      password.length < 6
+    ) {
+
+      setErrorMessage(
+        'Parola trebuie să aibă minimum 6 caractere.'
+      )
+
+      return
+
+    }
+
+
+    setLoading(true)
+
+
+    const { error } =
+      await supabase.auth
+        .signUp({
+
+          email:
+            email.trim(),
+
+          password:
+            password
+
+        })
+
+
+    setLoading(false)
+
+
+    if (error) {
+
+      setErrorMessage(
+        error.message
+      )
+
+      return
+
+    }
+
+
+    setMessage(
+      'Contul a fost creat. Verifică emailul pentru confirmare.'
+    )
+
+  }
+
+
+
+  // =====================================================
   // AM UITAT PAROLA
+  // =====================================================
+
   async function forgotPassword() {
 
-    if (!email) {
+    clearMessages()
 
-      setMessage(
+
+    if (!email.trim()) {
+
+      setErrorMessage(
         'Introdu mai întâi adresa de email.'
       )
 
@@ -142,40 +229,27 @@ function Auth() {
     }
 
 
+    setLoading(true)
+
+
     const { error } =
-      await supabase.auth.resetPasswordForEmail(
-        email,
-        {
-          redirectTo: window.location.origin
-        }
-      )
+      await supabase.auth
+        .resetPasswordForEmail(
+          email.trim(),
+          {
+            redirectTo:
+              window.location.origin
+          }
+        )
+
+
+    setLoading(false)
 
 
     if (error) {
 
-      setMessage(error.message)
-
-    }
-
-    else {
-
-      setMessage(
-        'Ți-am trimis un email pentru resetarea parolei.'
-      )
-
-    }
-
-  }
-
-
-
-  // SALVĂM PAROLA NOUĂ
-  async function changePassword() {
-
-    if (!newPassword) {
-
-      setMessage(
-        'Introdu noua parolă.'
+      setErrorMessage(
+        error.message
       )
 
       return
@@ -183,10 +257,30 @@ function Auth() {
     }
 
 
-    if (newPassword.length < 6) {
+    setMessage(
+      'Ți-am trimis un link pentru resetarea parolei.'
+    )
 
-      setMessage(
-        'Parola trebuie să aibă cel puțin 6 caractere.'
+  }
+
+
+
+  // =====================================================
+  // SALVARE PAROLĂ NOUĂ
+  // =====================================================
+
+  async function saveNewPassword() {
+
+    clearMessages()
+
+
+    if (
+      !password ||
+      !confirmPassword
+    ) {
+
+      setErrorMessage(
+        'Completează ambele câmpuri.'
       )
 
       return
@@ -194,84 +288,189 @@ function Auth() {
     }
 
 
+    if (
+      password !==
+      confirmPassword
+    ) {
+
+      setErrorMessage(
+        'Parolele nu coincid.'
+      )
+
+      return
+
+    }
+
+
+    if (
+      password.length < 6
+    ) {
+
+      setErrorMessage(
+        'Parola trebuie să aibă minimum 6 caractere.'
+      )
+
+      return
+
+    }
+
+
+    setLoading(true)
+
+
     const { error } =
-      await supabase.auth.updateUser({
+      await supabase.auth
+        .updateUser({
 
-        password: newPassword
+          password:
+            password
 
-      })
+        })
+
+
+    setLoading(false)
 
 
     if (error) {
 
-      setMessage(error.message)
-
-    }
-
-    else {
-
-      setMessage(
-        'Parola a fost schimbată cu succes!'
+      setErrorMessage(
+        error.message
       )
 
-      setResetMode(false)
-      setNewPassword('')
+      return
 
     }
+
+
+    setMessage(
+      'Parola a fost schimbată cu succes.'
+    )
 
   }
 
 
 
-  // Dacă userul a venit din emailul
-  // pentru resetarea parolei
+  // =====================================================
+  // RESET PASSWORD
+  // =====================================================
+
   if (resetMode) {
 
     return (
 
-      <div>
+      <div className="auth-page">
 
-        <h1>
-          PeakQuest 🏔️
-        </h1>
+        <div className="auth-content">
 
 
-        <h2>
-          Schimbă parola
-        </h2>
+          <div className="auth-logo">
+
+            PeakQuest
+
+            <span className="auth-logo-mountain">
+              🏔️
+            </span>
+
+          </div>
 
 
-        <input
-
-          type="password"
-
-          placeholder="Parola nouă"
-
-          value={newPassword}
-
-          onChange={(e) =>
-            setNewPassword(e.target.value)
-          }
-
-        />
+          <h1 className="auth-title">
+            Reset Password
+          </h1>
 
 
-        <br />
-        <br />
+          <div className="auth-card">
 
 
-        <button
-          onClick={changePassword}
-        >
+            <div className="auth-field">
 
-          Salvează parola nouă
-
-        </button>
+              <label htmlFor="new-password">
+                New Password
+              </label>
 
 
-        <p>
-          {message}
-        </p>
+              <input
+                id="new-password"
+
+                type="password"
+
+                value={password}
+
+                onChange={(e) =>
+                  setPassword(
+                    e.target.value
+                  )
+                }
+              />
+
+            </div>
+
+
+            <div className="auth-field">
+
+              <label htmlFor="confirm-password">
+                Confirm Password
+              </label>
+
+
+              <input
+                id="confirm-password"
+
+                type="password"
+
+                value={confirmPassword}
+
+                onChange={(e) =>
+                  setConfirmPassword(
+                    e.target.value
+                  )
+                }
+              />
+
+            </div>
+
+
+            {message && (
+
+              <div className="auth-message success">
+                {message}
+              </div>
+
+            )}
+
+
+            {errorMessage && (
+
+              <div className="auth-message error">
+                {errorMessage}
+              </div>
+
+            )}
+
+
+            <button
+              className="auth-login-button"
+
+              type="button"
+
+              disabled={loading}
+
+              onClick={
+                saveNewPassword
+              }
+            >
+
+              {loading
+                ? 'Se salvează...'
+                : 'Salvează parola'
+              }
+
+            </button>
+
+
+          </div>
+
+        </div>
 
       </div>
 
@@ -281,99 +480,209 @@ function Auth() {
 
 
 
-  // PAGINA NORMALĂ LOGIN / REGISTER
+  // =====================================================
+  // LOGIN / REGISTER
+  // =====================================================
+
   return (
 
-    <div>
-
-      <h1>
-        PeakQuest 🏔️
-      </h1>
-
-
-      <h2>
-        Login / Register
-      </h2>
-
-
-      <input
-
-        type="email"
-
-        placeholder="Email"
-
-        value={email}
-
-        onChange={(e) =>
-          setEmail(e.target.value)
-        }
-
-      />
+    <div  className="auth-page"
+          style={{
+            backgroundImage: `
+              linear-gradient(
+                rgba(8, 13, 23, 0.20),
+                rgba(8, 12, 20, 0.35)
+              ),
+              url(${authBg})
+            `
+      }}>
 
 
-      <br />
-      <br />
+      <div className="auth-content">
 
 
-      <input
+        {/* LOGO */}
 
-        type="password"
+        <div className="auth-logo">
 
-        placeholder="Parolă"
+          PeakQuest
 
-        value={password}
+          <span className="auth-logo-mountain">
+            🏔️
+          </span>
 
-        onChange={(e) =>
-          setPassword(e.target.value)
-        }
-
-      />
+        </div>
 
 
-      <br />
-      <br />
+
+        {/* TITLU */}
+
+        <h1 className="auth-title">
+
+          Login / Register
+
+        </h1>
 
 
-      <button
-        onClick={login}
-      >
 
-        Login
+        {/* CARD */}
 
-      </button>
+        <div className="auth-card">
 
 
-      {' '}
+          {/* EMAIL */}
+
+          <div className="auth-field">
+
+            <label htmlFor="email">
+              Email
+            </label>
 
 
-      <button
-        onClick={register}
-      >
+            <input
+              id="email"
 
-        Register
+              type="email"
 
-      </button>
+              value={email}
 
+              onChange={(e) =>
+                setEmail(
+                  e.target.value
+                )
+              }
 
-      <br />
-      <br />
+              autoComplete="email"
+            />
 
-
-      <button
-        onClick={forgotPassword}
-        style={{
-          color: 'black'
-        }}
-      >
-
-        Am uitat parola
-
-      </button>
+          </div>
 
 
-      <p>
-        {message}
-      </p>
+
+          {/* PASSWORD */}
+
+          <div className="auth-field">
+
+            <label htmlFor="password">
+              Password
+            </label>
+
+
+            <input
+              id="password"
+
+              type="password"
+
+              value={password}
+
+              onChange={(e) =>
+                setPassword(
+                  e.target.value
+                )
+              }
+
+              autoComplete="current-password"
+            />
+
+          </div>
+
+
+
+          {/* MESAJ SUCCES */}
+
+          {message && (
+
+            <div className="auth-message success">
+
+              {message}
+
+            </div>
+
+          )}
+
+
+
+          {/* MESAJ EROARE */}
+
+          {errorMessage && (
+
+            <div className="auth-message error">
+
+              {errorMessage}
+
+            </div>
+
+          )}
+
+
+
+          {/* LOGIN */}
+
+          <button
+            className="auth-login-button"
+
+            type="button"
+
+            disabled={loading}
+
+            onClick={login}
+          >
+
+            {loading
+              ? 'Please wait...'
+              : 'Login'
+            }
+
+          </button>
+
+
+
+          {/* REGISTER */}
+
+          <button
+            className="auth-register-button"
+
+            type="button"
+
+            disabled={loading}
+
+            onClick={register}
+          >
+
+            Register
+
+          </button>
+
+
+
+          {/* FORGOT PASSWORD */}
+
+          <button
+            className="auth-forgot-button"
+
+            type="button"
+
+            disabled={loading}
+
+            onClick={
+              forgotPassword
+            }
+          >
+
+            Am uitat parola
+
+          </button>
+
+
+        </div>
+
+      </div>
+
+
+      <div className="auth-decoration">
+        ✦
+      </div>
+
 
     </div>
 
