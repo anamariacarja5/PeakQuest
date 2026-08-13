@@ -5,7 +5,9 @@
 .peakquest-app {
   width: 100%;
   min-height: 100vh;
+
   padding: 8px;
+
   background: #17191e;
 }
 
@@ -50,8 +52,6 @@
 
   font-size: 28px;
   font-weight: 500;
-
-  letter-spacing: 0.3px;
 }
 
 
@@ -73,8 +73,8 @@
 .user-area {
   position: absolute;
 
-  right: 8px;
   top: 8px;
+  right: 8px;
 
   width: 245px;
 
@@ -177,7 +177,7 @@
 
   overflow: hidden;
 
-  background: #222;
+  background: #222222;
 
   border: 1px solid #3d3f44;
   border-radius: 7px;
@@ -203,8 +203,6 @@
   top: 14px;
   right: 14px;
 
-  left: auto;
-
   z-index: 1000;
 
   width: 260px;
@@ -217,11 +215,12 @@
 
 
 /* =====================================================
-   ADAUGĂ FOTOGRAFIE DESKTOP
+   FOTO DESKTOP
 ===================================================== */
 
 .photo-button {
   width: 100%;
+
   min-height: 38px;
 
   padding: 9px 12px;
@@ -230,11 +229,14 @@
   align-items: center;
   justify-content: center;
 
-  background: rgba(255, 255, 255, 0.96);
+  background:
+    rgba(255, 255, 255, 0.96);
 
   color: #333333;
 
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border:
+    1px solid rgba(0, 0, 0, 0.12);
+
   border-radius: 7px;
 
   font-size: 12px;
@@ -247,12 +249,13 @@
 
 
 .photo-button:hover {
-  background: white;
+  background: #ffffff;
 }
 
 
 .photo-button.processing {
   opacity: 0.65;
+
   cursor: not-allowed;
 }
 
@@ -266,7 +269,8 @@
 
   padding: 9px 11px;
 
-  background: rgba(255, 255, 255, 0.96);
+  background:
+    rgba(255, 255, 255, 0.96);
 
   color: #555555;
 
@@ -285,7 +289,7 @@
 
 
 /* =====================================================
-   SEARCH
+   SEARCH DESKTOP
 ===================================================== */
 
 .search-row {
@@ -310,7 +314,7 @@
 
   padding: 0 10px;
 
-  background: white;
+  background: #ffffff;
 
   border-radius: 7px;
 
@@ -328,6 +332,7 @@
 
 .search-box input {
   width: 100%;
+
   min-width: 0;
 
   border: none;
@@ -358,7 +363,7 @@
   align-items: center;
   justify-content: center;
 
-  background: white;
+  background: #ffffff;
 
   color: #555555;
 
@@ -378,7 +383,7 @@
 
 
 /* =====================================================
-   POPUP MARKER
+   POPUP
 ===================================================== */
 
 .visit-popup {
@@ -426,7 +431,7 @@
 
 
 /* =====================================================
-   BUTON DELETE
+   DELETE
 ===================================================== */
 
 .delete-button {
@@ -434,11 +439,13 @@
 
   padding: 5px 7px;
 
-  background: white;
+  background: #ffffff;
 
   color: #bd2424;
 
-  border: 1px solid #bd2424;
+  border:
+    1px solid #bd2424;
+
   border-radius: 3px;
 
   font-size: 10px;
@@ -451,12 +458,12 @@
 .delete-button:hover {
   background: #bd2424;
 
-  color: white;
+  color: #ffffff;
 }
 
 
 /* =====================================================
-   BUTON CAMERA DIN POPUP
+   BUTON FOTO POPUP
 ===================================================== */
 
 .view-photo-button {
@@ -481,41 +488,22 @@
   font-size: 19px;
 
   cursor: pointer;
-
-  box-shadow:
-    0 1px 4px rgba(0, 0, 0, 0.18);
-
-  transition:
-    background 0.15s ease,
-    transform 0.15s ease;
 }
 
 
 .view-photo-button:hover {
-  background: #e5e5e5;
-
-  transform: translateY(-1px);
+  background: #e8e8e8;
 }
 
 
 /* =====================================================
-   FOTOGRAFIE DESCHISĂ PESTE HARTĂ
+   PREVIEW FOTOGRAFIE
 ===================================================== */
-
-/*
-  FOARTE IMPORTANT:
-  acest stil este GLOBAL.
-
-  Nu trebuie să fie în interiorul unui @media.
-*/
 
 .image-preview-overlay {
   position: fixed;
 
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  inset: 0;
 
   z-index: 999999;
 
@@ -525,13 +513,10 @@
 
   padding: 20px;
 
-  background: rgba(0, 0, 0, 0.92);
+  background:
+    rgba(0, 0, 0, 0.92);
 }
 
-
-/* =====================================================
-   IMAGINEA
-===================================================== */
 
 .image-preview-full {
   width: auto;
@@ -551,10 +536,6 @@
 }
 
 
-/* =====================================================
-   X ÎNCHIDERE FOTOGRAFIE
-===================================================== */
-
 .image-preview-close {
   position: fixed;
 
@@ -572,22 +553,19 @@
   align-items: center;
   justify-content: center;
 
-  background: rgba(0, 0, 0, 0.75);
+  background:
+    rgba(0, 0, 0, 0.75);
 
-  color: white;
+  color: #ffffff;
 
-  border: 1px solid rgba(255, 255, 255, 0.7);
+  border:
+    1px solid rgba(255, 255, 255, 0.7);
+
   border-radius: 50%;
 
   font-size: 28px;
-  line-height: 1;
 
   cursor: pointer;
-}
-
-
-.image-preview-close:hover {
-  background: #222222;
 }
 
 
@@ -607,7 +585,10 @@
 ===================================================== */
 
 .leaflet-container {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    Arial,
+    Helvetica,
+    sans-serif;
 }
 
 
@@ -617,20 +598,14 @@
 
 
 /* =====================================================
-   ELEMENTE MOBILE
-   Pe desktop sunt ascunse.
+   MOBILE ASCUNS PE DESKTOP
 ===================================================== */
 
-.mobile-add-control {
-  display: none;
-}
-
-
-.mobile-add-overlay {
-  display: none;
-}
-
-
+.mobile-tools-toggle,
+.mobile-tools-bar,
+.mobile-square-tool,
+.mobile-add-overlay,
+.mobile-search-overlay,
 .mobile-map-status {
   display: none;
 }
@@ -695,11 +670,9 @@
   }
 
 
-  /* USER */
-
   .user-area {
-    right: 6px;
     top: 7px;
+    right: 6px;
 
     width: 145px;
   }
@@ -733,27 +706,38 @@
   }
 
 
-  /* Ascundem controalele desktop */
-
   .map-panel {
     display: none;
   }
 
 
   /* ===================================================
-     CAMERA MOBIL SUB + / -
+     ◎ BUTON PRINCIPAL
+
+     Leaflet + / - au aproximativ 30x30.
+     Îl facem exact 30x30.
   =================================================== */
 
-  .mobile-add-control {
+  .mobile-tools-toggle {
     position: absolute;
 
-    top: 80px;
+    /*
+      + / - se termină aproximativ la 70px.
+      Aici lăsăm 8px spațiu.
+    */
+    top: 78px;
     left: 10px;
 
-    z-index: 1100;
+    z-index: 1300;
 
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
+
+    min-width: 30px;
+    min-height: 30px;
+
+    max-width: 30px;
+    max-height: 30px;
 
     padding: 0;
 
@@ -761,24 +745,129 @@
     align-items: center;
     justify-content: center;
 
-    background: white;
+    box-sizing: border-box;
 
-    color: #333333;
+    background: #ffffff;
 
-    border: 1px solid #bdbdbd;
+    color: #222222;
+
+    border:
+      2px solid rgba(0, 0, 0, 0.20);
+
     border-radius: 4px;
 
     box-shadow:
-      0 1px 5px rgba(0, 0, 0, 0.3);
+      0 1px 4px rgba(0, 0, 0, 0.22);
 
-    font-size: 15px;
+    font-size: 17px;
+
+    line-height: 1;
 
     cursor: pointer;
   }
 
 
-  .mobile-add-control:active {
+  .mobile-tools-toggle:hover {
+    background: #f4f4f4;
+  }
+
+
+  .mobile-tools-toggle:active {
+    background: #e8e8e8;
+  }
+
+
+  .mobile-tools-toggle.active {
     background: #eeeeee;
+  }
+
+
+  /* ===================================================
+     BARA CU 📷 ȘI 🔍
+  =================================================== */
+
+  .mobile-tools-bar {
+    position: absolute;
+
+    /*
+      Exact aceeași linie ca ◎
+    */
+    top: 78px;
+
+    /*
+      ◎ începe la 10px și are 30px.
+      Lăsăm 7px până la primul buton.
+    */
+    left: 47px;
+
+    z-index: 1250;
+
+    width: auto;
+    height: 30px;
+
+    display: flex;
+    align-items: center;
+
+    gap: 6px;
+  }
+
+
+  /* ===================================================
+     📷 ȘI 🔍
+
+     EXACT 30 x 30
+  =================================================== */
+
+  .mobile-square-tool {
+    width: 30px;
+    height: 30px;
+
+    min-width: 30px;
+    min-height: 30px;
+
+    max-width: 30px;
+    max-height: 30px;
+
+    flex:
+      0
+      0
+      30px;
+
+    padding: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    box-sizing: border-box;
+
+    background: #ffffff;
+
+    color: #222222;
+
+    border:
+      2px solid rgba(0, 0, 0, 0.20);
+
+    border-radius: 4px;
+
+    box-shadow:
+      0 1px 4px rgba(0, 0, 0, 0.22);
+
+    font-size: 14px;
+
+    line-height: 1;
+
+    cursor: pointer;
+  }
+
+
+  .mobile-square-tool:hover {
+    background: #f4f4f4;
+  }
+
+
+  .mobile-square-tool:active {
+    background: #e8e8e8;
   }
 
 
@@ -789,15 +878,18 @@
   .mobile-map-status {
     position: absolute;
 
-    left: 55px;
-    right: 10px;
-    top: 82px;
+    top: 116px;
 
-    z-index: 1050;
+    left: 10px;
+    right: 10px;
+
+    z-index: 1200;
 
     display: block;
 
-    padding: 8px 10px;
+    padding:
+      8px
+      10px;
 
     background:
       rgba(255, 255, 255, 0.94);
@@ -809,7 +901,7 @@
     font-size: 9px;
 
     box-shadow:
-      0 2px 7px rgba(0, 0, 0, 0.2);
+      0 2px 7px rgba(0, 0, 0, 0.20);
 
     pointer-events: none;
 
@@ -827,7 +919,174 @@
 
 
   /* ===================================================
-     FUNDAL POPUP ADAUGĂ
+     POPUP SEARCH MOBIL
+  =================================================== */
+
+  .mobile-search-overlay {
+    position: fixed;
+
+    inset: 0;
+
+    z-index: 5100;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 20px;
+
+    background:
+      rgba(0, 0, 0, 0.60);
+
+    backdrop-filter:
+      blur(4px);
+  }
+
+
+  .mobile-search-modal {
+    position: relative;
+
+    width: 100%;
+    max-width: 330px;
+
+    padding:
+      30px
+      22px
+      22px;
+
+    background: #2d2f33;
+
+    color: #eeeeee;
+
+    border:
+      1px solid #45474d;
+
+    border-radius: 14px;
+
+    text-align: center;
+
+    box-shadow:
+      0 15px 45px rgba(0, 0, 0, 0.48);
+  }
+
+
+  .mobile-search-close {
+    position: absolute;
+
+    top: 8px;
+    right: 10px;
+
+    width: 30px;
+    height: 30px;
+
+    padding: 0;
+
+    background: transparent;
+
+    color: #aaaaaa;
+
+    border: none;
+
+    font-size: 25px;
+
+    cursor: pointer;
+  }
+
+
+  .mobile-search-modal-icon {
+    margin-bottom: 8px;
+
+    font-size: 36px;
+  }
+
+
+  .mobile-search-modal h2 {
+    margin:
+      0
+      0
+      8px;
+
+    color: #ffffff;
+
+    font-size: 19px;
+
+    font-weight: 500;
+  }
+
+
+  .mobile-search-modal p {
+    margin:
+      0
+      0
+      18px;
+
+    color: #bbbbbb;
+
+    font-size: 11px;
+
+    line-height: 1.45;
+  }
+
+
+  .mobile-search-input-row {
+    width: 100%;
+
+    height: 42px;
+
+    display: flex;
+
+    overflow: hidden;
+
+    background: #ffffff;
+
+    border-radius: 8px;
+  }
+
+
+  .mobile-search-input-row input {
+    flex: 1;
+
+    min-width: 0;
+
+    padding:
+      0
+      12px;
+
+    background: #ffffff;
+
+    color: #222222;
+
+    border: none;
+
+    outline: none;
+
+    font-size: 13px;
+  }
+
+
+  .mobile-search-input-row button {
+    flex-shrink: 0;
+
+    width: 44px;
+
+    padding: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    background: #f0f0f0;
+
+    border: none;
+
+    font-size: 18px;
+
+    cursor: pointer;
+  }
+
+
+  /* ===================================================
+     POPUP ADAUGĂ FOTOGRAFIE
   =================================================== */
 
   .mobile-add-overlay {
@@ -844,15 +1103,12 @@
     padding: 20px;
 
     background:
-      rgba(0, 0, 0, 0.58);
+      rgba(0, 0, 0, 0.60);
 
-    backdrop-filter: blur(4px);
+    backdrop-filter:
+      blur(4px);
   }
 
-
-  /* ===================================================
-     POPUP ADAUGĂ
-  =================================================== */
 
   .mobile-add-modal {
     position: relative;
@@ -860,13 +1116,18 @@
     width: 100%;
     max-width: 330px;
 
-    padding: 30px 22px 22px;
+    padding:
+      30px
+      22px
+      22px;
 
     background: #2d2f33;
 
     color: #eeeeee;
 
-    border: 1px solid #45474d;
+    border:
+      1px solid #45474d;
+
     border-radius: 14px;
 
     text-align: center;
@@ -899,6 +1160,12 @@
   }
 
 
+  .mobile-modal-close:hover,
+  .mobile-search-close:hover {
+    color: #ffffff;
+  }
+
+
   .mobile-modal-icon {
     margin-bottom: 8px;
 
@@ -907,9 +1174,12 @@
 
 
   .mobile-add-modal h2 {
-    margin: 0 0 8px;
+    margin:
+      0
+      0
+      8px;
 
-    color: white;
+    color: #ffffff;
 
     font-size: 20px;
     font-weight: 500;
@@ -917,7 +1187,10 @@
 
 
   .mobile-add-modal p {
-    margin: 0 0 20px;
+    margin:
+      0
+      0
+      20px;
 
     color: #bbbbbb;
 
@@ -927,22 +1200,20 @@
   }
 
 
-  /* ===================================================
-     BUTON ALEGE FOTOGRAFIA
-  =================================================== */
-
   .mobile-photo-button {
     width: 100%;
 
     min-height: 44px;
 
-    padding: 10px 15px;
+    padding:
+      10px
+      15px;
 
     display: flex;
     align-items: center;
     justify-content: center;
 
-    background: white;
+    background: #ffffff;
 
     color: #292929;
 
@@ -950,13 +1221,12 @@
     border-radius: 8px;
 
     font-size: 13px;
-    font-weight: 500;
 
     cursor: pointer;
   }
 
 
-  .mobile-photo-button:active {
+  .mobile-photo-button:hover {
     background: #eeeeee;
   }
 
@@ -969,7 +1239,7 @@
 
 
   /* ===================================================
-     POPUP MARKER MOBIL
+     POPUP MARKER
   =================================================== */
 
   .visit-popup {
@@ -981,10 +1251,6 @@
   }
 
 
-  /* ===================================================
-     CAMERA POPUP
-  =================================================== */
-
   .view-photo-button {
     width: 35px;
     height: 35px;
@@ -994,7 +1260,7 @@
 
 
   /* ===================================================
-     FOTOGRAFIE MARE MOBIL
+     FOTOGRAFIE MARE
   =================================================== */
 
   .image-preview-overlay {
@@ -1004,6 +1270,7 @@
 
   .image-preview-full {
     max-width: 96vw;
+
     max-height: 88vh;
   }
 
@@ -1022,13 +1289,13 @@
 
 
 /* =====================================================
-   TELEFOANE FOARTE MICI
+   TELEFOANE MAI MICI
 ===================================================== */
 
-@media (max-width: 400px) {
+@media (max-width: 430px) {
 
   .logo {
-    font-size: 16px;
+    font-size: 17px;
   }
 
 
@@ -1038,17 +1305,97 @@
 
 
   .user-area {
-    width: 125px;
+    width: 130px;
   }
 
 
   .user-email {
-    max-width: 92px;
+    max-width: 96px;
   }
 
 
-  .mobile-add-modal {
-    max-width: 290px;
+  /*
+    IMPORTANT:
+    toate trei rămân 30 x 30
+  */
+
+  .mobile-tools-toggle {
+    width: 30px;
+    height: 30px;
+
+    min-width: 30px;
+    min-height: 30px;
+
+    max-width: 30px;
+    max-height: 30px;
   }
+
+
+  .mobile-tools-bar {
+    top: 78px;
+    left: 47px;
+
+    height: 30px;
+
+    gap: 5px;
+  }
+
+
+  .mobile-square-tool {
+    width: 30px;
+    height: 30px;
+
+    min-width: 30px;
+    min-height: 30px;
+
+    max-width: 30px;
+    max-height: 30px;
+
+    flex:
+      0
+      0
+      30px;
+  }
+
+}
+
+
+/* =====================================================
+   TELEFOANE FOARTE MICI
+===================================================== */
+
+@media (max-width: 350px) {
+
+  .logo {
+    font-size: 15px;
+  }
+
+
+  .logo-mountain {
+    font-size: 17px;
+  }
+
+
+  .user-area {
+    width: 118px;
+  }
+
+
+  .user-email {
+    max-width: 86px;
+  }
+
+
+  .mobile-tools-bar {
+    gap: 4px;
+  }
+
+
+  /*
+    Și aici rămân exact:
+    ◎ = 30x30
+    📷 = 30x30
+    🔍 = 30x30
+  */
 
 }

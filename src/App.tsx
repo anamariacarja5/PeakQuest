@@ -7,7 +7,8 @@ import {
   MapContainer,
   TileLayer,
   Marker,
-  Popup
+  Popup,
+  useMap
 } from 'react-leaflet'
 
 import { divIcon } from 'leaflet'
@@ -25,6 +26,11 @@ const PEAK_ACCEPT_DISTANCE = 250
 const LOOKUP_TIMEOUT = 3000
 
 const PHOTO_BUCKET = 'VISIT-PHOTOS'
+
+const ROMANIA_CENTER: [number, number] = [
+  45.8,
+  24.9
+]
 
 
 // =====================================================
@@ -85,6 +91,97 @@ const mountainIcon = divIcon({
 
 
 // =====================================================
+// CONTROL HARTĂ
+// =====================================================
+
+type MapControllerProps = {
+  selectedVisit: any | null
+  resetSignal: number
+}
+
+
+function MapController({
+  selectedVisit,
+  resetSignal
+}: MapControllerProps) {
+
+  const map = useMap()
+
+
+  // ===================================================
+  // MERGEM LA LOCAȚIA CĂUTATĂ
+  // ===================================================
+
+  useEffect(() => {
+
+    if (!selectedVisit) {
+      return
+    }
+
+
+    const latitude =
+      Number(selectedVisit.latitude)
+
+
+    const longitude =
+      Number(selectedVisit.longitude)
+
+
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude)
+    ) {
+      return
+    }
+
+
+    map.flyTo(
+      [
+        latitude,
+        longitude
+      ],
+      15,
+      {
+        duration: 1.5
+      }
+    )
+
+  }, [
+    selectedVisit,
+    map
+  ])
+
+
+  // ===================================================
+  // RESET HARTĂ
+  // ===================================================
+
+  useEffect(() => {
+
+    if (resetSignal === 0) {
+      return
+    }
+
+
+    map.flyTo(
+      ROMANIA_CENTER,
+      7,
+      {
+        duration: 1.2
+      }
+    )
+
+  }, [
+    resetSignal,
+    map
+  ])
+
+
+  return null
+}
+
+
+// =====================================================
 // APP
 // =====================================================
 
@@ -112,10 +209,21 @@ function App() {
   const [searchTerm, setSearchTerm] =
     useState('')
 
+  const [selectedVisit, setSelectedVisit] =
+    useState<any | null>(null)
+
+  const [resetMapSignal, setResetMapSignal] =
+    useState(0)
+
   const [addPopupOpen, setAddPopupOpen] =
     useState(false)
 
-  // Fotografia deschisă mare.
+  const [mobileToolsOpen, setMobileToolsOpen] =
+    useState(false)
+
+  const [mobileSearchOpen, setMobileSearchOpen] =
+    useState(false)
+
   const [
     selectedImageUrl,
     setSelectedImageUrl
@@ -130,6 +238,7 @@ function App() {
 
     getCurrentUser()
 
+
     const { data } =
       supabase.auth.onAuthStateChange(
         (_event, session) => {
@@ -140,6 +249,7 @@ function App() {
 
         }
       )
+
 
     return () => {
 
@@ -153,9 +263,7 @@ function App() {
   useEffect(() => {
 
     if (user) {
-
       getVisits()
-
     }
 
   }, [user])
@@ -171,32 +279,28 @@ function App() {
       !status ||
       !status.includes('✅')
     ) {
-
       return
-
     }
+
 
     const timer =
       window.setTimeout(
         () => {
-
           setStatus('')
-
         },
         3000
       )
 
+
     return () => {
-
       window.clearTimeout(timer)
-
     }
 
   }, [status])
 
 
   // ===================================================
-  // CURĂȚĂM URL-UL POZEI
+  // CURĂȚĂM URL-UL FOTOGRAFIEI
   // ===================================================
 
   useEffect(() => {
@@ -219,12 +323,17 @@ function App() {
   }, [selectedImageUrl])
 
 
+  // ===================================================
+  // USER
+  // ===================================================
+
   async function getCurrentUser() {
 
     const {
       data: { user }
     } =
       await supabase.auth.getUser()
+
 
     setUser(user)
 
@@ -248,6 +357,7 @@ function App() {
           }
         )
 
+
     if (error) {
 
       console.log(
@@ -259,6 +369,7 @@ function App() {
 
     }
 
+
     setVisits(
       data ?? []
     )
@@ -267,7 +378,7 @@ function App() {
 
 
   // ===================================================
-  // ÎNCĂRCARE FOTOGRAFIE ÎN STORAGE
+  // UPLOAD FOTOGRAFIE
   // ===================================================
 
   async function uploadVisitPhoto(
@@ -275,9 +386,7 @@ function App() {
   ): Promise<string | null> {
 
     if (!user) {
-
       return null
-
     }
 
 
@@ -298,14 +407,6 @@ function App() {
       `${Date.now()}-${crypto.randomUUID()}.${extension}`
 
 
-    /*
-      Structura din Storage:
-
-      VISIT-PHOTOS/
-          USER-ID/
-              fotografie.jpg
-    */
-
     const filePath =
       `${user.id}/${fileName}`
 
@@ -317,11 +418,9 @@ function App() {
           filePath,
           file,
           {
-            cacheControl:
-              '3600',
+            cacheControl: '3600',
 
-            upsert:
-              false,
+            upsert: false,
 
             contentType:
               file.type ||
@@ -337,9 +436,11 @@ function App() {
         error
       )
 
+
       alert(
         `Fotografia nu a putut fi încărcată:\n${error.message}`
       )
+
 
       return null
 
@@ -370,17 +471,6 @@ function App() {
     }
 
 
-    console.log(
-      'Încerc să deschid fotografia:',
-      visit.image_path
-    )
-
-
-    /*
-      Descărcăm fotografia direct din
-      bucket-ul privat VISIT-PHOTOS.
-    */
-
     const {
       data,
       error
@@ -395,13 +485,15 @@ function App() {
     if (error) {
 
       console.log(
-        'EROARE DESCĂRCARE FOTOGRAFIE:',
+        'Eroare descărcare fotografie:',
         error
       )
+
 
       alert(
         `Fotografia nu poate fi deschisă:\n${error.message}`
       )
+
 
       return
 
@@ -419,11 +511,8 @@ function App() {
     }
 
 
-    // Transformăm Blob-ul într-un URL local.
     const imageUrl =
-      URL.createObjectURL(
-        data
-      )
+      URL.createObjectURL(data)
 
 
     setSelectedImageUrl(
@@ -434,7 +523,7 @@ function App() {
 
 
   // ===================================================
-  // ÎNCHIDERE FOTOGRAFIE
+  // ÎNCHIDEM FOTOGRAFIA
   // ===================================================
 
   function closeImagePreview() {
@@ -451,15 +540,13 @@ function App() {
     }
 
 
-    setSelectedImageUrl(
-      null
-    )
+    setSelectedImageUrl(null)
 
   }
 
 
   // ===================================================
-  // CALCUL DISTANȚĂ
+  // DISTANȚĂ
   // ===================================================
 
   function calculateDistance(
@@ -474,15 +561,11 @@ function App() {
 
 
     const lat1Rad =
-      lat1 *
-      Math.PI /
-      180
+      lat1 * Math.PI / 180
 
 
     const lat2Rad =
-      lat2 *
-      Math.PI /
-      180
+      lat2 * Math.PI / 180
 
 
     const deltaLat =
@@ -498,37 +581,24 @@ function App() {
 
 
     const a =
-      Math.sin(
-        deltaLat / 2
-      ) *
-      Math.sin(
-        deltaLat / 2
-      )
+      Math.sin(deltaLat / 2) *
+      Math.sin(deltaLat / 2)
       +
       Math.cos(lat1Rad) *
       Math.cos(lat2Rad) *
-      Math.sin(
-        deltaLon / 2
-      ) *
-      Math.sin(
-        deltaLon / 2
-      )
+      Math.sin(deltaLon / 2) *
+      Math.sin(deltaLon / 2)
 
 
     const c =
       2 *
       Math.atan2(
         Math.sqrt(a),
-        Math.sqrt(
-          1 - a
-        )
+        Math.sqrt(1 - a)
       )
 
 
-    return (
-      earthRadius *
-      c
-    )
+    return earthRadius * c
 
   }
 
@@ -554,17 +624,12 @@ function App() {
     const parsed =
       Number.parseFloat(
         String(value)
-          .replace(
-            ',',
-            '.'
-          )
+          .replace(',', '.')
       )
 
 
     if (
-      !Number.isFinite(
-        parsed
-      )
+      !Number.isFinite(parsed)
     ) {
 
       return null
@@ -572,9 +637,7 @@ function App() {
     }
 
 
-    return Math.round(
-      parsed
-    )
+    return Math.round(parsed)
 
   }
 
@@ -596,9 +659,7 @@ function App() {
     const timer =
       window.setTimeout(
         () => {
-
           controller.abort()
-
         },
         timeout
       )
@@ -620,9 +681,7 @@ function App() {
 
     finally {
 
-      window.clearTimeout(
-        timer
-      )
+      window.clearTimeout(timer)
 
     }
 
@@ -724,14 +783,11 @@ function App() {
           ),
 
         mountainRange:
-          data.address
-            ?.mountain_range
+          data.address?.mountain_range
           ||
-          data.extratags
-            ?.['is_in:mountains']
+          data.extratags?.['is_in:mountains']
           ||
-          data.extratags
-            ?.['is_in:mountain_range']
+          data.extratags?.['is_in:mountain_range']
           ||
           null
       }
@@ -751,26 +807,19 @@ function App() {
         displayName:
           'Loc vizitat',
 
-        name:
-          null,
+        name: null,
 
-        category:
-          null,
+        category: null,
 
-        type:
-          null,
+        type: null,
 
-        latitude:
-          null,
+        latitude: null,
 
-        longitude:
-          null,
+        longitude: null,
 
-        elevation:
-          null,
+        elevation: null,
 
-        mountainRange:
-          null
+        mountainRange: null
       }
 
     }
@@ -807,8 +856,7 @@ function App() {
         await fetchWithTimeout(
           'https://overpass-api.de/api/interpreter',
           {
-            method:
-              'POST',
+            method: 'POST',
 
             headers: {
               'Content-Type':
@@ -817,8 +865,7 @@ function App() {
 
             body:
               new URLSearchParams({
-                data:
-                  query
+                data: query
               })
           },
           LOOKUP_TIMEOUT
@@ -856,11 +903,9 @@ function App() {
       ) {
 
         if (
-          typeof element.lat !==
-          'number'
+          typeof element.lat !== 'number'
           ||
-          typeof element.lon !==
-          'number'
+          typeof element.lon !== 'number'
         ) {
 
           continue
@@ -881,11 +926,9 @@ function App() {
           PeakInfo = {
 
           name:
-            element.tags
-              ?.['name:ro']
+            element.tags?.['name:ro']
             ||
-            element.tags
-              ?.name
+            element.tags?.name
             ||
             'Vârf fără nume',
 
@@ -904,14 +947,11 @@ function App() {
             distance,
 
           mountainRange:
-            element.tags
-              ?.['is_in:mountains']
+            element.tags?.['is_in:mountains']
             ||
-            element.tags
-              ?.['is_in:mountain_range']
+            element.tags?.['is_in:mountain_range']
             ||
-            element.tags
-              ?.mountain_range
+            element.tags?.mountain_range
             ||
             null
         }
@@ -962,7 +1002,7 @@ function App() {
 
 
   // ===================================================
-  // NOMINATIM SPUNE DIRECT CĂ ESTE VÂRF
+  // NOMINATIM SPUNE CĂ ESTE VÂRF
   // ===================================================
 
   function peakFromReverseLocation(
@@ -972,11 +1012,9 @@ function App() {
   ): PeakInfo | null {
 
     if (
-      location.category !==
-      'natural'
+      location.category !== 'natural'
       ||
-      location.type !==
-      'peak'
+      location.type !== 'peak'
     ) {
 
       return null
@@ -1050,10 +1088,7 @@ function App() {
     file: File
   ) {
 
-    setProcessing(
-      true
-    )
-
+    setProcessing(true)
 
     setStatus(
       '📷 Citesc coordonatele GPS...'
@@ -1062,14 +1097,8 @@ function App() {
 
     try {
 
-      // ===============================================
-      // GPS
-      // ===============================================
-
       const gps =
-        await exifr.gps(
-          file
-        )
+        await exifr.gps(file)
 
 
       if (!gps) {
@@ -1078,9 +1107,7 @@ function App() {
           'Fotografia nu conține coordonate GPS.'
         )
 
-        setStatus(
-          ''
-        )
+        setStatus('')
 
         return
 
@@ -1102,10 +1129,6 @@ function App() {
         `identific locația...`
       )
 
-
-      // ===============================================
-      // LOC + VÂRF
-      // ===============================================
 
       const [
         location,
@@ -1162,12 +1185,7 @@ function App() {
         null
 
 
-      // ===============================================
-      // TEXT
-      // ===============================================
-
-      let detectedInfo =
-        ''
+      let detectedInfo = ''
 
 
       if (peak) {
@@ -1194,9 +1212,7 @@ ${
 ${locationDetails}
 
 Distanță față de vârf:
-${Math.round(
-  peak.distance
-)} m`
+${Math.round(peak.distance)} m`
 
       }
 
@@ -1216,10 +1232,6 @@ ${locationDetails}`
           : `📍 ${locationDetails}`
       )
 
-
-      // ===============================================
-      // DESCRIERE
-      // ===============================================
 
       const description =
         window.prompt(
@@ -1253,10 +1265,6 @@ Scrie o descriere pentru acest loc:`
       }
 
 
-      // ===============================================
-      // SALVĂM FOTOGRAFIA
-      // ===============================================
-
       setStatus(
         '📷 Salvez fotografia...'
       )
@@ -1275,10 +1283,6 @@ Scrie o descriere pentru acest loc:`
       }
 
 
-      // ===============================================
-      // SALVĂM LOCAȚIA
-      // ===============================================
-
       setStatus(
         '💾 Salvez locația...'
       )
@@ -1292,11 +1296,9 @@ Scrie o descriere pentru acest loc:`
             user_id:
               user.id,
 
-            latitude:
-              latitude,
+            latitude,
 
-            longitude:
-              longitude,
+            longitude,
 
             place_name:
               placeName,
@@ -1314,8 +1316,7 @@ Scrie o descriere pentru acest loc:`
             mountain_range:
               mountainRange,
 
-            description:
-              description,
+            description,
 
             image_path:
               imagePath,
@@ -1335,8 +1336,6 @@ Scrie o descriere pentru acest loc:`
         )
 
 
-        // Dacă salvarea locației a eșuat,
-        // ștergem fotografia încărcată.
         await supabase.storage
           .from(PHOTO_BUCKET)
           .remove([
@@ -1347,6 +1346,7 @@ Scrie o descriere pentru acest loc:`
         alert(
           'Punctul nu a putut fi salvat.'
         )
+
 
         return
 
@@ -1405,9 +1405,7 @@ Scrie o descriere pentru acest loc:`
 
     finally {
 
-      setProcessing(
-        false
-      )
+      setProcessing(false)
 
     }
 
@@ -1415,7 +1413,7 @@ Scrie o descriere pentru acest loc:`
 
 
   // ===================================================
-  // DELETE LOCAȚIE + FOTOGRAFIE
+  // DELETE
   // ===================================================
 
   async function deleteVisit(
@@ -1429,13 +1427,10 @@ Scrie o descriere pentru acest loc:`
 
 
     if (!confirmed) {
-
       return
-
     }
 
 
-    // Ștergem poza din Storage.
     if (
       visit.image_path
     ) {
@@ -1453,7 +1448,7 @@ Scrie o descriere pentru acest loc:`
       if (photoError) {
 
         console.log(
-          'Eroare la ștergerea fotografiei:',
+          'Eroare fotografie:',
           photoError
         )
 
@@ -1462,6 +1457,7 @@ Scrie o descriere pentru acest loc:`
           `Fotografia nu a putut fi ștearsă:\n${photoError.message}`
         )
 
+
         return
 
       }
@@ -1469,7 +1465,6 @@ Scrie o descriere pentru acest loc:`
     }
 
 
-    // Ștergem locația.
     const { error } =
       await supabase
         .from('visits')
@@ -1482,12 +1477,6 @@ Scrie o descriere pentru acest loc:`
 
     if (error) {
 
-      console.log(
-        'Eroare la ștergerea locației:',
-        error
-      )
-
-
       alert(
         'Locația nu a putut fi ștearsă.'
       )
@@ -1497,11 +1486,176 @@ Scrie o descriere pentru acest loc:`
     }
 
 
+    if (
+      selectedVisit?.id ===
+      visit.id
+    ) {
+
+      setSelectedVisit(null)
+
+    }
+
+
     await getVisits()
 
 
     setStatus(
       '✅ Locația a fost ștearsă.'
+    )
+
+  }
+
+
+  // ===================================================
+  // NORMALIZARE SEARCH
+  // ===================================================
+
+  function normalizeSearchText(
+    text: string
+  ) {
+
+    return text
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(
+        /[\u0300-\u036f]/g,
+        ''
+      )
+      .replace(
+        /\bvarful\b/g,
+        'vf'
+      )
+      .replace(
+        /\bvarf\b/g,
+        'vf'
+      )
+      .replace(
+        /\bvf\./g,
+        'vf'
+      )
+      .replace(
+        /[^a-z0-9\s]/g,
+        ' '
+      )
+      .replace(
+        /\s+/g,
+        ' '
+      )
+      .trim()
+
+  }
+
+
+  // ===================================================
+  // SEARCH ÎN LOCURILE VIZITATE
+  // ===================================================
+
+  function searchVisitedPlace() {
+
+    const query =
+      normalizeSearchText(
+        searchTerm
+      )
+
+
+    if (!query) {
+
+      alert(
+        'Scrie numele unei locații.'
+      )
+
+      return false
+
+    }
+
+
+    const foundVisit =
+      visits.find(
+        (visit) => {
+
+          const searchableText =
+            normalizeSearchText(
+              `${visit.place_name ?? ''} ` +
+              `${visit.location_details ?? ''} ` +
+              `${visit.description ?? ''}`
+            )
+
+
+          return searchableText
+            .includes(query)
+
+        }
+      )
+
+
+    if (!foundVisit) {
+
+      alert(
+        'Nu ai vizitat încă această locație.'
+      )
+
+
+      return false
+
+    }
+
+
+    if (
+      selectedVisit?.id ===
+      foundVisit.id
+    ) {
+
+      setSelectedVisit(null)
+
+
+      window.setTimeout(
+        () => {
+
+          setSelectedVisit(
+            foundVisit
+          )
+
+        },
+        20
+      )
+
+    }
+
+    else {
+
+      setSelectedVisit(
+        foundVisit
+      )
+
+    }
+
+
+    setStatus(
+      `✅ Am găsit: ${
+        foundVisit.place_name ||
+        'locația vizitată'
+      }`
+    )
+
+
+    return true
+
+  }
+
+
+  // ===================================================
+  // RESET HARTĂ
+  // ===================================================
+
+  function resetMap() {
+
+    setSelectedVisit(null)
+
+    setSearchTerm('')
+
+    setResetMapSignal(
+      (value) =>
+        value + 1
     )
 
   }
@@ -1543,9 +1697,6 @@ Scrie o descriere pentru acest loc:`
 
         <div className="visit-popup">
 
-
-          {/* TITLU */}
-
           <div className="visit-title">
 
             {visit.is_peak
@@ -1562,18 +1713,11 @@ Scrie o descriere pentru acest loc:`
           </div>
 
 
-          {/* =================================================
-              BUTON FOTOGRAFIE
-          ================================================= */}
-
           {visit.image_path && (
 
             <button
-
               className="view-photo-button"
-
               type="button"
-
               title="Vezi fotografia"
 
               onClick={(e) => {
@@ -1587,7 +1731,6 @@ Scrie o descriere pentru acest loc:`
                 )
 
               }}
-
             >
 
               📷
@@ -1597,12 +1740,7 @@ Scrie o descriere pentru acest loc:`
           )}
 
 
-          {/* =================================================
-              INFORMAȚII
-          ================================================= */}
-
           <div className="visit-info">
-
 
             {visit.is_peak && (
 
@@ -1695,10 +1833,6 @@ Scrie o descriere pentru acest loc:`
           </div>
 
 
-          {/* =================================================
-              DESCRIERE + DELETE
-          ================================================= */}
-
           <div className="popup-bottom">
 
             <div className="description">
@@ -1717,7 +1851,6 @@ Scrie o descriere pentru acest loc:`
 
 
             <button
-
               className="delete-button"
 
               onClick={() =>
@@ -1725,7 +1858,6 @@ Scrie o descriere pentru acest loc:`
                   visit
                 )
               }
-
             >
 
               DELETE
@@ -1744,39 +1876,7 @@ Scrie o descriere pentru acest loc:`
 
 
   // ===================================================
-  // SEARCH
-  // ===================================================
-
-  const filteredVisits =
-    visits.filter(
-      (visit) => {
-
-        if (!searchTerm) {
-
-          return true
-
-        }
-
-
-        const text =
-          `${visit.place_name ?? ''} ` +
-          `${visit.location_details ?? ''} ` +
-          `${visit.description ?? ''}`
-
-
-        return text
-          .toLowerCase()
-          .includes(
-            searchTerm
-              .toLowerCase()
-          )
-
-      }
-    )
-
-
-  // ===================================================
-  // PAGINA
+  // UI
   // ===================================================
 
   return (
@@ -1804,7 +1904,6 @@ Scrie o descriere pentru acest loc:`
         <div className="user-area">
 
           <button
-
             className="user-button"
 
             onClick={() =>
@@ -1812,7 +1911,6 @@ Scrie o descriere pentru acest loc:`
                 !profileOpen
               )
             }
-
           >
 
             <span className="user-email">
@@ -1834,11 +1932,8 @@ Scrie o descriere pentru acest loc:`
             <div className="user-dropdown">
 
               <button
-
                 className="logout-button"
-
                 onClick={logout}
-
               >
 
                 ↪ Deconectare
@@ -1862,19 +1957,17 @@ Scrie o descriere pentru acest loc:`
 
 
         {/* =================================================
-            PANOU DESKTOP
+            DESKTOP
         ================================================= */}
 
         <div className="map-panel">
 
           <label
-
             className={
               processing
                 ? 'photo-button processing'
                 : 'photo-button'
             }
-
           >
 
             {processing
@@ -1884,11 +1977,8 @@ Scrie o descriere pentru acest loc:`
 
 
             <input
-
               type="file"
-
               accept="image/*"
-
               disabled={processing}
 
               style={{
@@ -1903,9 +1993,7 @@ Scrie o descriere pentru acest loc:`
 
                 if (file) {
 
-                  handlePhoto(
-                    file
-                  )
+                  handlePhoto(file)
 
                 }
 
@@ -1913,7 +2001,6 @@ Scrie o descriere pentru acest loc:`
                 e.target.value = ''
 
               }}
-
             />
 
           </label>
@@ -1922,13 +2009,11 @@ Scrie o descriere pentru acest loc:`
           {status && (
 
             <div
-
               className={
                 status.includes('✅')
                   ? 'status-box success'
                   : 'status-box'
               }
-
             >
 
               {status}
@@ -1948,11 +2033,8 @@ Scrie o descriere pentru acest loc:`
 
 
               <input
-
                 type="text"
-
-                placeholder="Caută..."
-
+                placeholder="Caută un loc vizitat..."
                 value={searchTerm}
 
                 onChange={(e) =>
@@ -1961,6 +2043,17 @@ Scrie o descriere pentru acest loc:`
                   )
                 }
 
+                onKeyDown={(e) => {
+
+                  if (
+                    e.key === 'Enter'
+                  ) {
+
+                    searchVisitedPlace()
+
+                  }
+
+                }}
               />
 
             </div>
@@ -1969,16 +2062,28 @@ Scrie o descriere pentru acest loc:`
             <button
               className="small-map-button"
               type="button"
+              title="Caută"
+              onClick={
+                searchVisitedPlace
+              }
             >
-              🗺
+
+              🔎
+
             </button>
 
 
             <button
               className="small-map-button"
               type="button"
+              title="Arată România"
+              onClick={
+                resetMap
+              }
             >
+
               ◎
+
             </button>
 
           </div>
@@ -1987,38 +2092,230 @@ Scrie o descriere pentru acest loc:`
 
 
         {/* =================================================
-            BUTON MOBIL ADAUGĂ FOTO
+            MOBIL - BUTON MENIU
         ================================================= */}
 
         <button
-
-          className="mobile-add-control"
-
-          onClick={() =>
-            setAddPopupOpen(
-              true
-            )
+          className={
+            mobileToolsOpen
+              ? 'mobile-tools-toggle active'
+              : 'mobile-tools-toggle'
           }
 
           type="button"
 
-          title="Adaugă fotografie"
+          title={
+            mobileToolsOpen
+              ? 'Închide meniul'
+              : 'Deschide meniul'
+          }
 
+          onClick={() => {
+
+            setMobileToolsOpen(
+              !mobileToolsOpen
+            )
+
+            if (mobileToolsOpen) {
+
+              setMobileSearchOpen(
+                false
+              )
+
+            }
+
+          }}
         >
 
-          📷
+          ◎
 
         </button>
 
 
         {/* =================================================
-            POPUP ADĂUGARE MOBIL
+            MOBIL - CELE DOUĂ BUTOANE
+        ================================================= */}
+
+        {mobileToolsOpen && (
+
+          <div className="mobile-tools-bar">
+
+            {/* CAMERA */}
+
+            <button
+              className="mobile-square-tool"
+              type="button"
+              title="Adaugă fotografie"
+
+              onClick={() =>
+                setAddPopupOpen(
+                  true
+                )
+              }
+            >
+
+              📷
+
+            </button>
+
+
+            {/* SEARCH */}
+
+            <button
+              className="mobile-square-tool"
+              type="button"
+              title="Caută un loc"
+
+              onClick={() =>
+                setMobileSearchOpen(
+                  true
+                )
+              }
+            >
+
+              🔍
+
+            </button>
+
+          </div>
+
+        )}
+
+
+        {/* =================================================
+            POPUP SEARCH MOBIL
+        ================================================= */}
+
+        {mobileSearchOpen && (
+
+          <div
+            className="mobile-search-overlay"
+
+            onClick={() =>
+              setMobileSearchOpen(
+                false
+              )
+            }
+          >
+
+            <div
+              className="mobile-search-modal"
+
+              onClick={(e) =>
+                e.stopPropagation()
+              }
+            >
+
+              <button
+                className="mobile-search-close"
+                type="button"
+
+                onClick={() =>
+                  setMobileSearchOpen(
+                    false
+                  )
+                }
+              >
+
+                ×
+
+              </button>
+
+
+              <div className="mobile-search-modal-icon">
+                🔍
+              </div>
+
+
+              <h2>
+                Caută un loc vizitat
+              </h2>
+
+
+              <p>
+                Poți căuta doar în locațiile pe care le-ai vizitat deja.
+              </p>
+
+
+              <div className="mobile-search-input-row">
+
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Ex: vf omu"
+
+                  value={searchTerm}
+
+                  onChange={(e) =>
+                    setSearchTerm(
+                      e.target.value
+                    )
+                  }
+
+                  onKeyDown={(e) => {
+
+                    if (
+                      e.key === 'Enter'
+                    ) {
+
+                      const found =
+                        searchVisitedPlace()
+
+
+                      if (found) {
+
+                        setMobileSearchOpen(
+                          false
+                        )
+
+                      }
+
+                    }
+
+                  }}
+                />
+
+
+                <button
+                  type="button"
+
+                  onClick={() => {
+
+                    const found =
+                      searchVisitedPlace()
+
+
+                    if (found) {
+
+                      setMobileSearchOpen(
+                        false
+                      )
+
+                    }
+
+                  }}
+                >
+
+                  🔍
+
+                </button>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        )}
+
+
+        {/* =================================================
+            POPUP ADAUGĂ FOTOGRAFIE
         ================================================= */}
 
         {addPopupOpen && (
 
           <div
-
             className="mobile-add-overlay"
 
             onClick={() =>
@@ -2026,31 +2323,25 @@ Scrie o descriere pentru acest loc:`
                 false
               )
             }
-
           >
 
             <div
-
               className="mobile-add-modal"
 
               onClick={(e) =>
                 e.stopPropagation()
               }
-
             >
 
               <button
-
                 className="mobile-modal-close"
+                type="button"
 
                 onClick={() =>
                   setAddPopupOpen(
                     false
                   )
                 }
-
-                type="button"
-
               >
 
                 ×
@@ -2059,35 +2350,26 @@ Scrie o descriere pentru acest loc:`
 
 
               <div className="mobile-modal-icon">
-
                 📷
-
               </div>
 
 
               <h2>
-
                 Adaugă o locație
-
               </h2>
 
 
               <p>
-
-                Alege o fotografie care conține
-                coordonate GPS.
-
+                Alege o fotografie care conține coordonate GPS.
               </p>
 
 
               <label
-
                 className={
                   processing
                     ? 'mobile-photo-button processing'
                     : 'mobile-photo-button'
                 }
-
               >
 
                 {processing
@@ -2097,11 +2379,8 @@ Scrie o descriere pentru acest loc:`
 
 
                 <input
-
                   type="file"
-
                   accept="image/*"
-
                   disabled={processing}
 
                   style={{
@@ -2131,7 +2410,6 @@ Scrie o descriere pentru acest loc:`
                     e.target.value = ''
 
                   }}
-
                 />
 
               </label>
@@ -2150,13 +2428,11 @@ Scrie o descriere pentru acest loc:`
         {status && (
 
           <div
-
             className={
               status.includes('✅')
                 ? 'mobile-map-status success'
                 : 'mobile-map-status'
             }
-
           >
 
             {status}
@@ -2171,33 +2447,35 @@ Scrie o descriere pentru acest loc:`
         ================================================= */}
 
         <MapContainer
-
-          center={[
-            45.8,
-            24.9
-          ]}
+          center={
+            ROMANIA_CENTER
+          }
 
           zoom={7}
 
           className="leaflet-map"
-
         >
 
           <TileLayer
-
             attribution="&copy; OpenStreetMap contributors"
 
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-
           />
 
 
-          {filteredVisits.map(
-            (visit) => {
+          <MapController
+            selectedVisit={
+              selectedVisit
+            }
 
-              // =========================================
-              // VÂRF MONTAN
-              // =========================================
+            resetSignal={
+              resetMapSignal
+            }
+          />
+
+
+          {visits.map(
+            (visit) => {
 
               if (
                 visit.is_peak
@@ -2206,10 +2484,7 @@ Scrie o descriere pentru acest loc:`
                 return (
 
                   <Marker
-
-                    key={
-                      visit.id
-                    }
+                    key={visit.id}
 
                     position={[
                       visit.latitude,
@@ -2219,7 +2494,6 @@ Scrie o descriere pentru acest loc:`
                     icon={
                       mountainIcon
                     }
-
                   >
 
                     {visitPopup(
@@ -2233,23 +2507,15 @@ Scrie o descriere pentru acest loc:`
               }
 
 
-              // =========================================
-              // LOC NORMAL
-              // =========================================
-
               return (
 
                 <Marker
-
-                  key={
-                    visit.id
-                  }
+                  key={visit.id}
 
                   position={[
                     visit.latitude,
                     visit.longitude
                   ]}
-
                 >
 
                   {visitPopup(
@@ -2269,31 +2535,26 @@ Scrie o descriere pentru acest loc:`
 
 
       {/* =================================================
-          FOTOGRAFIE MARE
+          PREVIEW FOTOGRAFIE
       ================================================= */}
 
       {selectedImageUrl && (
 
         <div
-
           className="image-preview-overlay"
 
           onClick={
             closeImagePreview
           }
-
         >
 
           <button
-
             className="image-preview-close"
+            type="button"
 
             onClick={
               closeImagePreview
             }
-
-            type="button"
-
           >
 
             ×
@@ -2302,7 +2563,6 @@ Scrie o descriere pentru acest loc:`
 
 
           <img
-
             src={
               selectedImageUrl
             }
@@ -2311,12 +2571,9 @@ Scrie o descriere pentru acest loc:`
 
             className="image-preview-full"
 
-            onClick={(e) => {
-
+            onClick={(e) =>
               e.stopPropagation()
-
-            }}
-
+            }
           />
 
         </div>
