@@ -1,0 +1,722 @@
+.statistics-page {
+  width: 100%;
+  min-height: 100%;
+
+  box-sizing: border-box;
+
+  padding: 28px;
+
+  color: #f5f7f6;
+
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(57, 109, 83, 0.22),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      #171b1b 0%,
+      #101313 100%
+    );
+}
+
+
+.statistics-header {
+  max-width: 1180px;
+
+  margin:
+    0
+    auto
+    24px;
+}
+
+
+.statistics-eyebrow {
+  margin:
+    0
+    0
+    5px;
+
+  color: #8ebca5;
+
+  font-size: 12px;
+  font-weight: 800;
+
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+
+.statistics-header h1 {
+  margin: 0;
+
+  font-size:
+    clamp(
+      28px,
+      4vw,
+      42px
+    );
+
+  line-height: 1.05;
+}
+
+
+.statistics-description {
+  max-width: 650px;
+
+  margin:
+    10px
+    0
+    0;
+
+  color: #aeb9b4;
+
+  line-height: 1.5;
+}
+
+
+/* =====================================================
+   CARDURI
+===================================================== */
+
+.statistics-cards {
+  max-width: 1180px;
+
+  margin:
+    0
+    auto
+    18px;
+
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      4,
+      minmax(
+        0,
+        1fr
+      )
+    );
+
+  gap: 14px;
+}
+
+
+.stat-card {
+  min-width: 0;
+  min-height: 116px;
+
+  box-sizing: border-box;
+
+  display: flex;
+  align-items: center;
+
+  gap: 14px;
+
+  padding: 18px;
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.055
+    );
+
+  border:
+    1px solid
+    rgba(
+      255,
+      255,
+      255,
+      0.08
+    );
+
+  border-radius: 18px;
+
+  box-shadow:
+    0
+    16px
+    42px
+    rgba(
+      0,
+      0,
+      0,
+      0.16
+    );
+
+  backdrop-filter:
+    blur(
+      12px
+    );
+}
+
+
+.stat-icon {
+  width: 48px;
+  height: 48px;
+
+  flex:
+    0
+    0
+    48px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 14px;
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.07
+    );
+
+  font-size: 24px;
+}
+
+
+.stat-card > div:last-child {
+  min-width: 0;
+
+  display: flex;
+  flex-direction: column;
+}
+
+
+.stat-label {
+  color: #aeb9b4;
+
+  font-size: 12px;
+  font-weight: 700;
+}
+
+
+.stat-value {
+  margin-top: 4px;
+
+  font-size: 26px;
+
+  line-height: 1.05;
+}
+
+
+.stat-detail {
+  max-width: 100%;
+
+  overflow: hidden;
+
+  margin-top: 6px;
+
+  color: #88ad9b;
+
+  font-size: 11px;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* =====================================================
+   GRAFICE
+===================================================== */
+
+.statistics-grid {
+  max-width: 1180px;
+
+  margin: 0 auto;
+
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      2,
+      minmax(
+        0,
+        1fr
+      )
+    );
+
+  gap: 18px;
+}
+
+
+.chart-card {
+  min-width: 0;
+
+  box-sizing: border-box;
+
+  padding: 20px;
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.05
+    );
+
+  border:
+    1px solid
+    rgba(
+      255,
+      255,
+      255,
+      0.08
+    );
+
+  border-radius: 20px;
+
+  box-shadow:
+    0
+    18px
+    52px
+    rgba(
+      0,
+      0,
+      0,
+      0.17
+    );
+}
+
+
+.chart-card-wide {
+  grid-column:
+    1 /
+    -1;
+}
+
+
+.chart-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+
+  gap: 16px;
+
+  margin-bottom: 12px;
+}
+
+
+.chart-card-header h2 {
+  margin:
+    4px
+    0
+    0;
+
+  font-size: 18px;
+}
+
+
+.chart-kicker {
+  color: #81aa96;
+
+  font-size: 11px;
+  font-weight: 800;
+
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+
+.chart-badge {
+  width: 36px;
+  height: 36px;
+
+  flex:
+    0
+    0
+    36px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 11px;
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.06
+    );
+}
+
+
+.chart-container {
+  width: 100%;
+  height: 300px;
+
+  min-width: 0;
+
+  color: #75ad91;
+}
+
+
+.chart-card-wide
+.chart-container {
+  height: 330px;
+}
+
+
+.chart-card
+.recharts-text {
+  fill: #9eaaa4;
+
+  font-size: 11px;
+}
+
+
+.chart-card
+.recharts-tooltip-wrapper {
+  outline: none;
+}
+
+
+.chart-card
+.recharts-default-tooltip {
+  border:
+    1px solid
+    rgba(
+      255,
+      255,
+      255,
+      0.1
+    )
+    !important;
+
+  border-radius: 12px;
+
+  background:
+    #202626
+    !important;
+
+  color:
+    #ffffff
+    !important;
+
+  box-shadow:
+    0
+    12px
+    34px
+    rgba(
+      0,
+      0,
+      0,
+      0.24
+    );
+}
+
+
+.chart-empty {
+  min-height: 240px;
+
+  display: grid;
+  place-items: center;
+
+  margin: 0;
+
+  padding: 20px;
+
+  color: #88948e;
+
+  text-align: center;
+}
+
+
+.statistics-empty {
+  max-width: 720px;
+
+  margin:
+    52px
+    auto;
+
+  padding:
+    38px
+    22px;
+
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.04
+    );
+
+  border:
+    1px solid
+    rgba(
+      255,
+      255,
+      255,
+      0.07
+    );
+
+  border-radius: 22px;
+
+  text-align: center;
+}
+
+
+.statistics-empty > span {
+  font-size: 46px;
+}
+
+
+.statistics-empty h2 {
+  margin:
+    12px
+    0
+    8px;
+}
+
+
+.statistics-empty p {
+  margin: 0;
+
+  color: #9aa59f;
+}
+
+
+/* =====================================================
+   TABLETĂ
+===================================================== */
+
+@media (
+  max-width: 900px
+) {
+
+  .statistics-cards {
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(
+          0,
+          1fr
+        )
+      );
+  }
+
+}
+
+
+/* =====================================================
+   TELEFON
+===================================================== */
+
+@media (
+  max-width: 600px
+) {
+
+  .statistics-page {
+    padding:
+      18px
+      10px
+      92px;
+  }
+
+
+  .statistics-header {
+    margin-bottom: 16px;
+  }
+
+
+  .statistics-header h1 {
+    font-size: 26px;
+  }
+
+
+  .statistics-description {
+    font-size: 12px;
+  }
+
+
+  .statistics-cards {
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(
+          0,
+          1fr
+        )
+      );
+
+    gap: 9px;
+
+    margin-bottom: 12px;
+  }
+
+
+  .stat-card {
+    min-height: 108px;
+
+    align-items: flex-start;
+
+    padding: 12px;
+
+    border-radius: 15px;
+  }
+
+
+  .stat-icon {
+    width: 36px;
+    height: 36px;
+
+    flex-basis: 36px;
+
+    border-radius: 10px;
+
+    font-size: 19px;
+  }
+
+
+  .stat-label {
+    font-size: 10px;
+  }
+
+
+  .stat-value {
+    font-size: 20px;
+  }
+
+
+  .stat-detail {
+    font-size: 9px;
+
+    white-space: normal;
+  }
+
+
+  .statistics-grid {
+    grid-template-columns:
+      minmax(
+        0,
+        1fr
+      );
+
+    gap: 11px;
+  }
+
+
+  .chart-card,
+  .chart-card-wide {
+    grid-column: auto;
+
+    padding:
+      15px
+      8px;
+
+    border-radius: 16px;
+  }
+
+
+  .chart-card-header {
+    padding:
+      0
+      5px;
+
+    margin-bottom: 8px;
+  }
+
+
+  .chart-card-header h2 {
+    font-size: 15px;
+  }
+
+
+  .chart-kicker {
+    font-size: 9px;
+  }
+
+
+  .chart-badge {
+    width: 31px;
+    height: 31px;
+
+    flex-basis: 31px;
+
+    border-radius: 9px;
+
+    font-size: 15px;
+  }
+
+
+  .chart-container,
+  .chart-card-wide
+  .chart-container {
+    height: 250px;
+  }
+
+
+  .chart-card
+  .recharts-text {
+    font-size: 9px;
+  }
+
+
+  .chart-empty {
+    min-height: 190px;
+
+    font-size: 11px;
+  }
+
+}
+
+
+/* =====================================================
+   TELEFOANE MICI
+===================================================== */
+
+@media (
+  max-width: 390px
+) {
+
+  .statistics-page {
+    padding-left: 7px;
+    padding-right: 7px;
+  }
+
+
+  .statistics-cards {
+    gap: 7px;
+  }
+
+
+  .stat-card {
+    display: block;
+
+    min-height: 118px;
+
+    padding: 10px;
+  }
+
+
+  .stat-icon {
+    margin-bottom: 8px;
+  }
+
+
+  .chart-container,
+  .chart-card-wide
+  .chart-container {
+    height: 235px;
+  }
+
+
+  .chart-card {
+    padding:
+      13px
+      4px;
+  }
+
+
+  .chart-card-header {
+    padding:
+      0
+      8px;
+  }
+
+}
