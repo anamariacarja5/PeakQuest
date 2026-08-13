@@ -8,6 +8,8 @@ import type {
   FormEvent
 } from 'react'
 
+import { supabase } from '../lib/supabase'
+
 import './ChatBot.css'
 
 
@@ -180,16 +182,72 @@ type MountainRangeEntity = {
 }
 
 
+type AIIntent =
+  'peak_elevation'
+  |
+  'peak_range'
+  |
+  'peak_location'
+  |
+  'peak_coordinates'
+  |
+  'highest_visited_peak'
+  |
+  'list_visited_peaks'
+  |
+  'count_visited_peaks'
+  |
+  'have_i_visited_peak'
+  |
+  'visited_peaks_in_range'
+  |
+  'highest_peak_in_range'
+  |
+  'highest_peak_in_romania'
+  |
+  'compare_peaks'
+  |
+  'general_mountain_question'
+  |
+  'unknown'
+
+
 type ConversationIntent =
-  'elevation'
-  |
-  'range'
-  |
-  'location'
-  |
-  'coordinates'
-  |
+  AIIntent |
   null
+
+
+type AIInterpretation = {
+  intent:
+    AIIntent
+
+  peakName:
+    string | null
+
+  secondPeakName:
+    string | null
+
+  mountainRange:
+    string | null
+
+  minimumElevation:
+    number | null
+
+  wantsElevation:
+    boolean
+
+  wantsMountainRange:
+    boolean
+
+  wantsLocation:
+    boolean
+
+  wantsCoordinates:
+    boolean
+
+  usesUserVisits:
+    boolean
+}
 
 
 // =====================================================
@@ -4750,7 +4808,10 @@ Poți întreba:
       string,
 
     forcedName?:
-      string
+      string,
+
+    forcedRange?:
+      string | null
 
   ) {
 
@@ -4776,6 +4837,8 @@ Poți întreba:
 
 
     const rangeHint =
+      forcedRange
+      ||
       extractRangeHint(
         question
       )
@@ -4804,7 +4867,7 @@ Poți întreba:
 
     rememberPeak(
       peakName,
-      'elevation'
+      'peak_elevation'
     )
 
 
@@ -4908,7 +4971,7 @@ Altitudine${approximate}: ${peak.elevation} m${rangeText}`
 
     rememberPeak(
       peakName,
-      'range'
+      'peak_range'
     )
 
 
@@ -4990,7 +5053,7 @@ ${peak.mountainRanges.join(', ')}`
 
     rememberPeak(
       peakName,
-      'coordinates'
+      'peak_coordinates'
     )
 
 
@@ -5075,7 +5138,7 @@ Longitudine: ${peak.longitude.toFixed(6)}`
 
     rememberPeak(
       peakName,
-      'location'
+      'peak_location'
     )
 
 
@@ -5160,10 +5223,13 @@ Longitudine: ${peak.longitude.toFixed(6)}`
   // ===================================================
 
   async function answerHighestInRange(
-    question: string
+    question: string,
+    forcedRange?: string | null
   ) {
 
     const rangeHint =
+      forcedRange
+      ||
       extractRangeHint(
         question
       )
@@ -5480,10 +5546,13 @@ Altitudine: ${highest.elevation} m`
   // ===================================================
 
   async function answerHaveIVisited(
-    question: string
+    question: string,
+    forcedName?: string | null
   ) {
 
     const searchedName =
+      forcedName
+      ||
       extractPeakName(
         question
       )
@@ -5625,15 +5694,20 @@ ${externalMatch.name} — ${externalMatch.elevation} m`
   // ===================================================
 
   async function answerVisitedPeaksInRange(
-    question: string
+    question: string,
+    forcedRange?: string | null,
+    minimumElevation?: number | null
   ) {
 
     /*
-      Întâi varianta:
-      din Munții Făgăraș
+      Dacă AI-ul a extras deja masivul,
+      îl folosim direct. Altfel păstrăm
+      fallback-ul vechi din întrebare.
     */
 
     let rangeHint =
+      forcedRange
+      ||
       extractRangeHint(
         question
       )
@@ -5799,8 +5873,24 @@ ${externalMatch.name} — ${externalMatch.elevation} m`
       )
 
 
+    const filteredMatched =
+      minimumElevation !==
+      null
+      &&
+      minimumElevation !==
+      undefined
+
+        ? matched.filter(
+            (item) =>
+              item.peak.elevation >=
+              minimumElevation
+          )
+
+        : matched
+
+
     if (
-      matched.length ===
+      filteredMatched.length ===
       0
     ) {
 
@@ -5812,7 +5902,7 @@ ${externalMatch.name} — ${externalMatch.elevation} m`
 
 
     const list =
-      matched
+      filteredMatched
 
         .sort(
           (a, b) =>
@@ -5838,10 +5928,475 @@ ${externalMatch.name} — ${externalMatch.elevation} m`
 
     return (
 
-`🏔️ Vârfurile tale din ${humanizeRangeName(rangeHint)}:
+`🏔️ Vârfurile tale din ${humanizeRangeName(rangeHint)}${minimumElevation !== null && minimumElevation !== undefined ? ` peste ${minimumElevation} m` : ''}:
 
 ${list}`
 
+    )
+
+  }
+
+
+
+  // ===================================================
+  // GEMINI - INTERPRETAREA ÎNTREBĂRII
+  // ===================================================
+
+  async function interpretQuestionWithAI(
+    question: string
+  ): Promise<AIInterpretation | null> {
+
+    try {
+
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .functions
+          .invoke(
+            'peakquest-ai',
+            {
+              body: {
+
+                question,
+
+                lastPeakName:
+                  lastPeakNameRef.current,
+
+                lastIntent:
+                  lastIntentRef.current
+
+              }
+            }
+          )
+
+
+      if (
+        error
+      ) {
+
+        console.error(
+          'PeakQuest AI Edge Function:',
+          error
+        )
+
+
+        return null
+
+      }
+
+
+      const interpretation =
+        data
+          ?.interpretation
+
+
+      if (
+        !interpretation
+        ||
+        typeof interpretation.intent !==
+        'string'
+      ) {
+
+        return null
+
+      }
+
+
+      console.log(
+        'PeakQuest AI interpretation:',
+        interpretation
+      )
+
+
+      return (
+        interpretation as AIInterpretation
+      )
+
+    }
+
+    catch (error) {
+
+      console.error(
+        'PeakQuest AI:',
+        error
+      )
+
+
+      return null
+
+    }
+
+  }
+
+
+  // ===================================================
+  // RĂSPUNS COMBINAT DESPRE UN VÂRF
+  // ===================================================
+
+  async function answerPeakInfoFromAI(
+    ai: AIInterpretation
+  ) {
+
+    const peakName =
+      ai.peakName
+      ||
+      lastPeakNameRef.current
+
+
+    if (
+      !peakName
+    ) {
+
+      return (
+        'Spune-mi despre ce vârf este vorba.'
+      )
+
+    }
+
+
+    const peak =
+      await findPeakFacts(
+        peakName,
+        ai.mountainRange
+      )
+
+
+    if (
+      !peak
+    ) {
+
+      return (
+        `❌ Nu am reușit să identific sigur vârful „${peakName}”.`
+      )
+
+    }
+
+
+    lastPeakNameRef.current =
+      peakName
+
+
+    lastIntentRef.current =
+      ai.intent
+
+
+    const lines:
+      string[] =
+      []
+
+
+    lines.push(
+      `🏔️ ${peak.name}`
+    )
+
+
+    if (
+      ai.wantsElevation
+    ) {
+
+      if (
+        peak.elevation !==
+        null
+      ) {
+
+        const approximate =
+          peak.source.includes(
+            'dem'
+          )
+
+            ? ' aproximativă'
+
+            : ''
+
+
+        lines.push(
+          `Altitudine${approximate}: ${peak.elevation} m`
+        )
+
+      }
+
+      else {
+
+        lines.push(
+          'Altitudine: indisponibilă în sursele actuale.'
+        )
+
+      }
+
+    }
+
+
+    if (
+      ai.wantsMountainRange
+    ) {
+
+      if (
+        peak.mountainRanges.length >
+        0
+      ) {
+
+        lines.push(
+          `Masiv: ${peak.mountainRanges.join(', ')}`
+        )
+
+      }
+
+      else {
+
+        lines.push(
+          'Masiv: indisponibil în sursele actuale.'
+        )
+
+      }
+
+    }
+
+
+    if (
+      ai.wantsLocation
+    ) {
+
+      if (
+        peak.locations.length >
+        0
+      ) {
+
+        lines.push(
+          `Locație: ${peak.locations.join(', ')}`
+        )
+
+      }
+
+
+      if (
+        peak.country
+      ) {
+
+        lines.push(
+          `Țară: ${peak.country}`
+        )
+
+      }
+
+
+      if (
+        peak.locations.length ===
+        0
+        &&
+        !peak.country
+      ) {
+
+        lines.push(
+          'Locație: indisponibilă în sursele actuale.'
+        )
+
+      }
+
+    }
+
+
+    if (
+      ai.wantsCoordinates
+    ) {
+
+      if (
+        peak.latitude !==
+        null
+        &&
+        peak.longitude !==
+        null
+      ) {
+
+        lines.push(
+          `Latitudine: ${peak.latitude.toFixed(6)}`
+        )
+
+        lines.push(
+          `Longitudine: ${peak.longitude.toFixed(6)}`
+        )
+
+      }
+
+      else {
+
+        lines.push(
+          'Coordonate: indisponibile în sursele actuale.'
+        )
+
+      }
+
+    }
+
+
+    /*
+      Dacă AI-ul a clasificat întrebarea
+      despre un vârf, dar nu a activat
+      niciun flag, afișăm informațiile
+      cele mai utile pe care le avem.
+    */
+
+    if (
+      lines.length ===
+      1
+    ) {
+
+      if (
+        peak.elevation !==
+        null
+      ) {
+
+        lines.push(
+          `Altitudine: ${peak.elevation} m`
+        )
+
+      }
+
+
+      if (
+        peak.mountainRanges.length >
+        0
+      ) {
+
+        lines.push(
+          `Masiv: ${peak.mountainRanges.join(', ')}`
+        )
+
+      }
+
+    }
+
+
+    return lines.join(
+      '\n\n'
+    )
+
+  }
+
+
+  // ===================================================
+  // COMPARĂ DOUĂ VÂRFURI
+  // ===================================================
+
+  async function answerComparePeaks(
+    firstName: string | null,
+    secondName: string | null
+  ) {
+
+    if (
+      !firstName
+      ||
+      !secondName
+    ) {
+
+      return (
+        'Spune-mi cele două vârfuri pe care vrei să le compar.'
+      )
+
+    }
+
+
+    const [
+      first,
+      second
+    ] =
+      await Promise.all([
+
+        findPeakFacts(
+          firstName
+        ),
+
+        findPeakFacts(
+          secondName
+        )
+
+      ])
+
+
+    if (
+      !first
+      ||
+      !second
+    ) {
+
+      return (
+        '❌ Nu am reușit să identific sigur ambele vârfuri.'
+      )
+
+    }
+
+
+    if (
+      first.elevation ===
+      null
+      ||
+      second.elevation ===
+      null
+    ) {
+
+      return (
+        'Am identificat vârfurile, dar nu am altitudini suficiente pentru comparație.'
+      )
+
+    }
+
+
+    lastPeakNameRef.current =
+      firstName
+
+
+    lastIntentRef.current =
+      'compare_peaks'
+
+
+    const difference =
+      Math.abs(
+        first.elevation -
+        second.elevation
+      )
+
+
+    if (
+      first.elevation ===
+      second.elevation
+    ) {
+
+      return (
+`🏔️ ${first.name}: ${first.elevation} m
+
+🏔️ ${second.name}: ${second.elevation} m
+
+Au aceeași altitudine în datele disponibile.`
+      )
+
+    }
+
+
+    const higher =
+      first.elevation >
+      second.elevation
+
+        ? first
+
+        : second
+
+
+    const lower =
+      first.elevation >
+      second.elevation
+
+        ? second
+
+        : first
+
+
+    return (
+`🏔️ ${first.name}: ${first.elevation} m
+
+🏔️ ${second.name}: ${second.elevation} m
+
+⬆️ ${higher.name} este mai înalt decât ${lower.name} cu ${difference} m.`
     )
 
   }
@@ -5907,7 +6462,7 @@ ${list}`
 
     if (
       intent ===
-      'elevation'
+      'peak_elevation'
     ) {
 
       return await
@@ -5929,7 +6484,7 @@ ${list}`
 
     if (
       intent ===
-      'range'
+      'peak_range'
     ) {
 
       return await
@@ -5946,7 +6501,7 @@ ${list}`
 
     if (
       intent ===
-      'location'
+      'peak_location'
     ) {
 
       return await
@@ -5963,7 +6518,7 @@ ${list}`
 
     if (
       intent ===
-      'coordinates'
+      'peak_coordinates'
     ) {
 
       return await
@@ -5987,7 +6542,7 @@ ${list}`
   // INTERPRETAREA ÎNTREBĂRII
   // ===================================================
 
-  async function generateAnswer(
+  async function generateAnswerFallback(
     question: string
   ) {
 
@@ -6461,6 +7016,243 @@ ${list}`
 🏆 Care este cel mai înalt vârf pe care l-am vizitat?`
 
     )
+
+  }
+
+
+
+  // ===================================================
+  // GENERARE RĂSPUNS - AI MAI ÎNTÂI, REGULI CA FALLBACK
+  // ===================================================
+
+  async function generateAnswer(
+    question: string
+  ) {
+
+    /*
+      Gemini NU furnizează datele geografice.
+      El doar interpretează întrebarea.
+
+      Datele reale rămân în:
+      - Wikidata
+      - OpenStreetMap
+      - Open-Meteo
+      - visits din Supabase
+    */
+
+    const ai =
+      await interpretQuestionWithAI(
+        question
+      )
+
+
+    if (
+      ai
+    ) {
+
+      /*
+        Păstrăm contextul pentru mesaje precum:
+        "Și în ce masiv este?"
+        "Dar Moldoveanu?"
+      */
+
+      if (
+        ai.peakName
+      ) {
+
+        lastPeakNameRef.current =
+          ai.peakName
+
+      }
+
+
+      if (
+        ai.intent !==
+        'unknown'
+      ) {
+
+        lastIntentRef.current =
+          ai.intent
+
+      }
+
+
+      switch (
+        ai.intent
+      ) {
+
+
+        // =============================================
+        // INFORMAȚII DESPRE UN VÂRF
+        // =============================================
+
+        case 'peak_elevation':
+
+        case 'peak_range':
+
+        case 'peak_location':
+
+        case 'peak_coordinates': {
+
+          return await
+            answerPeakInfoFromAI(
+              ai
+            )
+
+        }
+
+
+        // =============================================
+        // CEL MAI ÎNALT VÂRF VIZITAT
+        // =============================================
+
+        case 'highest_visited_peak': {
+
+          return await
+            answerHighestVisitedPeak()
+
+        }
+
+
+        // =============================================
+        // LISTA VÂRFURILOR VIZITATE
+        // =============================================
+
+        case 'list_visited_peaks': {
+
+          return await
+            answerVisitedPeaks()
+
+        }
+
+
+        // =============================================
+        // NUMĂR VÂRFURI VIZITATE
+        // =============================================
+
+        case 'count_visited_peaks': {
+
+          return await
+            answerVisitedPeakCount()
+
+        }
+
+
+        // =============================================
+        // AM FOST PE VÂRF?
+        // =============================================
+
+        case 'have_i_visited_peak': {
+
+          return await
+            answerHaveIVisited(
+              question,
+              ai.peakName
+            )
+
+        }
+
+
+        // =============================================
+        // VÂRFURI VIZITATE DINTR-UN MASIV
+        // =============================================
+
+        case 'visited_peaks_in_range': {
+
+          return await
+            answerVisitedPeaksInRange(
+
+              question,
+
+              ai.mountainRange,
+
+              ai.minimumElevation
+
+            )
+
+        }
+
+
+        // =============================================
+        // CEL MAI ÎNALT DINTR-UN MASIV
+        // =============================================
+
+        case 'highest_peak_in_range': {
+
+          return await
+            answerHighestInRange(
+
+              question,
+
+              ai.mountainRange
+
+            )
+
+        }
+
+
+        // =============================================
+        // CEL MAI ÎNALT DIN ROMÂNIA
+        // =============================================
+
+        case 'highest_peak_in_romania': {
+
+          return await
+            answerHighestInRomania()
+
+        }
+
+
+        // =============================================
+        // COMPARAȚIE
+        // =============================================
+
+        case 'compare_peaks': {
+
+          return await
+            answerComparePeaks(
+
+              ai.peakName,
+
+              ai.secondPeakName
+
+            )
+
+        }
+
+
+        // =============================================
+        // ÎNTREBARE GENERALĂ / NECUNOSCUTĂ
+        //
+        // Nu lăsăm Gemini să inventeze informații.
+        // Încercăm sistemul nostru vechi.
+        // =============================================
+
+        case 'general_mountain_question':
+
+        case 'unknown':
+
+        default:
+          break
+
+      }
+
+    }
+
+
+    /*
+      Dacă Gemini nu este disponibil,
+      se termină Free Tier-ul,
+      Edge Function-ul are o problemă
+      sau AI-ul nu recunoaște întrebarea,
+      chatbotul rămâne funcțional cu
+      sistemul vechi bazat pe reguli.
+    */
+
+    return await
+      generateAnswerFallback(
+        question
+      )
 
   }
 
