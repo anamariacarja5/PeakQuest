@@ -462,15 +462,13 @@ function normalizePeakName(
     )
 
     /*
-      Negoiul -> Negoiu
-      Moldoveanul -> Moldoveanu
-      Omul -> Omu
-    */
+      Păstrăm numele propriu exact.
 
-    .replace(
-      /\b([a-z0-9]+u)l\b/g,
-      '$1'
-    )
+      IMPORTANT:
+      Nu eliminăm automat terminația "l".
+      Altfel nume reale precum "Pietrosul Rodnei"
+      ar deveni greșit "Pietrosu Rodnei".
+    */
 
     .replace(
       /\s+/g,
@@ -806,6 +804,18 @@ function extractPeakName(
 
   const phrases = [
 
+    /*
+      Formulări foarte scurte / naturale:
+      "Cât are Rarău?"
+      "Câți metri are Negoiu?"
+    */
+
+    'cati metri are',
+
+    'cati m are',
+
+    'cat are',
+
     'ce altitudine are',
 
     'care este altitudinea',
@@ -889,6 +899,37 @@ function extractPeakName(
       )
 
   }
+
+
+  /*
+    Curățăm și formulări în care cuvântul-cheie
+    este pus după numele vârfului:
+
+    "Pietrosul Rodnei înălțime"
+    "Negoiu altitudine"
+
+    dar și forme foarte scurte la început.
+  */
+
+  text =
+    text
+      .replace(
+        /^(?:cat are|cati metri are|cati m are)\s+/,
+        ' '
+      )
+      .replace(
+        /\s+(?:altitudine|inaltime|inalt)$/,
+        ' '
+      )
+      .replace(
+        /^(?:altitudine|inaltime)\s+/,
+        ' '
+      )
+      .replace(
+        /\s+/g,
+        ' '
+      )
+      .trim()
 
 
   return normalizePeakName(
@@ -6036,11 +6077,28 @@ ${list}`
   // ===================================================
 
   async function answerPeakInfoFromAI(
-    ai: AIInterpretation
+    ai: AIInterpretation,
+    question: string
   ) {
+
+    /*
+      Dacă Gemini a recunoscut intenția, dar nu a extras
+      numele, încercăm parserul local înainte să folosim
+      memoria conversației. Asta evită situații precum:
+
+      "Cât are Rarău?" -> să rămână pe Moldoveanu.
+    */
+
+    const parsedPeakName =
+      extractPeakName(
+        question
+      )
+
 
     const peakName =
       ai.peakName
+      ||
+      parsedPeakName
       ||
       lastPeakNameRef.current
 
@@ -6928,6 +6986,24 @@ Au aceeași altitudine în datele disponibile.`
         'inalt'
       )
 
+      ||
+
+      normalized.startsWith(
+        'cat are '
+      )
+
+      ||
+
+      normalized.startsWith(
+        'cati metri are '
+      )
+
+      ||
+
+      normalized.startsWith(
+        'cati m are '
+      )
+
     ) {
 
       return await
@@ -7096,7 +7172,8 @@ Au aceeași altitudine în datele disponibile.`
 
           return await
             answerPeakInfoFromAI(
-              ai
+              ai,
+              question
             )
 
         }
