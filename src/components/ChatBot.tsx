@@ -56,9 +56,18 @@ type OsmPeak = {
 
   tags?: {
     name?: string
+
     'name:ro'?: string
+
     alt_name?: string
+
     ele?: string
+
+    'is_in:mountains'?: string
+
+    'is_in:mountain_range'?: string
+
+    mountain_range?: string
 
     [key: string]:
       string | undefined
@@ -70,135 +79,143 @@ type IdentifiedPeak = {
   visitId:
     string | number
 
-  name:
-    string
+  name: string
 
-  elevation:
-    number
+  elevation: number
 
-  distance:
-    number
+  distance: number
 
-  latitude:
-    number
+  latitude: number
+  longitude: number
 
-  longitude:
-    number
+  mountainRange?:
+    string | null
 }
 
 
-type ElevationSource =
-  'open-meteo-geocoding'
-  |
-  'open-meteo-dem'
-  |
-  'osm'
-  |
-  'nominatim'
+type PeakFacts = {
+  qid?: string
 
-
-type PeakLookupResult = {
   name: string
 
   elevation:
     number | null
 
   latitude:
-    number
+    number | null
 
   longitude:
-    number
+    number | null
+
+  mountainRanges:
+    string[]
+
+  locations:
+    string[]
+
+  country:
+    string | null
 
   source:
-    ElevationSource
+    'wikidata'
+    |
+    'wikidata+dem'
+    |
+    'osm'
+    |
+    'osm+dem'
 }
 
 
-type OpenMeteoLocation = {
-  id?: number
+type WikidataSearchResult = {
+  id: string
 
-  name?: string
+  label?: string
 
-  latitude?: number
-  longitude?: number
+  description?: string
 
-  elevation?: number
-
-  feature_code?: string
-
-  country_code?: string
-
-  country?: string
-
-  admin1?: string
+  aliases?: string[]
 }
 
 
-type OpenMeteoSearchResponse = {
-  results?: OpenMeteoLocation[]
+type WikidataTextValue = {
+  language: string
+
+  value: string
 }
 
 
-type OpenMeteoElevationResponse = {
-  elevation?: number[]
+type WikidataEntity = {
+  id: string
+
+  labels?: Record<
+    string,
+    WikidataTextValue
+  >
+
+  descriptions?: Record<
+    string,
+    WikidataTextValue
+  >
+
+  aliases?: Record<
+    string,
+    WikidataTextValue[]
+  >
+
+  claims?: Record<
+    string,
+    any[]
+  >
 }
 
 
-type NominatimResult = {
-  lat?: string
-  lon?: string
+type MountainRangeEntity = {
+  qid: string
 
-  name?: string
+  name: string
 
-  display_name?: string
-
-  category?: string
-  type?: string
-
-  osm_id?: number
-  osm_type?: string
-
-  extratags?: {
-    ele?: string
-
-    [key: string]:
-      string | undefined
-  }
-
-  namedetails?: {
-    name?: string
-
-    [key: string]:
-      string | undefined
-  }
+  entity:
+    WikidataEntity
 }
+
+
+type ConversationIntent =
+  'elevation'
+  |
+  'range'
+  |
+  'location'
+  |
+  'coordinates'
+  |
+  null
 
 
 // =====================================================
 // CONFIG
 // =====================================================
 
-const OPEN_METEO_GEOCODING_URL =
-  'https://geocoding-api.open-meteo.com/v1/search'
+const WIKIDATA_API_URL =
+  'https://www.wikidata.org/w/api.php'
 
 
 const OPEN_METEO_ELEVATION_URL =
   'https://api.open-meteo.com/v1/elevation'
 
 
-const NOMINATIM_SEARCH_URL =
-  'https://nominatim.openstreetmap.org/search'
-
-
 const OVERPASS_URLS = [
+
   'https://overpass-api.de/api/interpreter',
+
   'https://overpass.kumi.systems/api/interpreter'
+
 ]
 
 
-// =====================================================
-// DISTANȚE
-// =====================================================
+const REQUEST_TIMEOUT =
+  18000
+
 
 const VISIT_PEAK_SEARCH_RADIUS =
   1500
@@ -209,35 +226,78 @@ const STRICT_PEAK_DISTANCE =
 
 
 /*
-  Dacă numele apare explicit în
-  locația salvată:
+  Dacă în textul locației apare
+  explicit numele vârfului:
 
   "Traseu ... Vârful Omu"
 
-  putem permite o distanță mai mare.
+  permitem fotografiei să fie
+  ceva mai departe de vârf.
 */
 
 const NAMED_PEAK_MAX_DISTANCE =
   8000
 
 
-const PEAK_NAME_COORDINATE_RADIUS =
-  3000
-
-
-const REQUEST_TIMEOUT =
-  18000
-
-
 // =====================================================
-// CACHE GLOBAL PENTRU CĂUTAREA VÂRFURILOR
+// CACHE
 // =====================================================
 
-const peakLookupCache =
+const peakFactsCache =
   new Map<
     string,
-    PeakLookupResult
+    PeakFacts
   >()
+
+
+const wikidataLabelCache =
+  new Map<
+    string,
+    string
+  >()
+
+
+const mountainRangeCache =
+  new Map<
+    string,
+    MountainRangeEntity
+  >()
+
+
+// =====================================================
+// NORMALIZARE SIMPLĂ
+// =====================================================
+
+function plainNormalize(
+  text: string
+) {
+
+  return text
+
+    .toLowerCase()
+
+    .normalize(
+      'NFD'
+    )
+
+    .replace(
+      /[\u0300-\u036f]/g,
+      ''
+    )
+
+    .replace(
+      /[^a-z0-9\s-]/g,
+      ' '
+    )
+
+    .replace(
+      /\s+/g,
+      ' '
+    )
+
+    .trim()
+
+}
 
 
 // =====================================================
@@ -248,17 +308,12 @@ function normalizeText(
   text: string
 ) {
 
-  return text
-    .toLowerCase()
-
-    .normalize('NFD')
-
-    .replace(
-      /[\u0300-\u036f]/g,
-      ''
-    )
+  return plainNormalize(
+    text
+  )
 
     // plural
+
     .replace(
       /\bvarfurile\b/g,
       'vf'
@@ -275,6 +330,7 @@ function normalizeText(
     )
 
     // singular
+
     .replace(
       /\bvarfului\b/g,
       'vf'
@@ -291,13 +347,8 @@ function normalizeText(
     )
 
     .replace(
-      /\bvf\./g,
+      /\bvf\b/g,
       'vf'
-    )
-
-    .replace(
-      /[^a-z0-9\s]/g,
-      ' '
     )
 
     .replace(
@@ -321,12 +372,525 @@ function normalizePeakName(
   return normalizeText(
     text
   )
+
     .replace(
       /^vf\s+/,
       ''
     )
 
+    .replace(
+      /^muntele\s+/,
+      ''
+    )
+
+    .replace(
+      /^munte\s+/,
+      ''
+    )
+
+    .replace(
+      /^mount\s+/,
+      ''
+    )
+
+    .replace(
+      /^peak\s+/,
+      ''
+    )
+
+    .replace(
+      /\s+peak$/,
+      ''
+    )
+
+    /*
+      Negoiul -> Negoiu
+      Moldoveanul -> Moldoveanu
+      Omul -> Omu
+    */
+
+    .replace(
+      /\b([a-z0-9]+u)l\b/g,
+      '$1'
+    )
+
+    .replace(
+      /\s+/g,
+      ' '
+    )
+
     .trim()
+
+}
+
+
+// =====================================================
+// NORMALIZARE MASIV
+// =====================================================
+
+function normalizeRangeName(
+  text: string
+) {
+
+  return plainNormalize(
+    text
+  )
+
+    .replace(
+      /^muntii\s+/,
+      ''
+    )
+
+    .replace(
+      /^muntele\s+/,
+      ''
+    )
+
+    .replace(
+      /^masivul\s+/,
+      ''
+    )
+
+    .replace(
+      /^masiv\s+/,
+      ''
+    )
+
+    .replace(
+      /\s+mountains$/,
+      ''
+    )
+
+    .replace(
+      /\s+mountain range$/,
+      ''
+    )
+
+    .replace(
+      /\s+massif$/,
+      ''
+    )
+
+    .replace(
+      /\s+/g,
+      ' '
+    )
+
+    .trim()
+
+}
+
+
+// =====================================================
+// AFIȘARE NUME VÂRF
+// =====================================================
+
+function humanizePeakName(
+  name: string
+) {
+
+  const trimmed =
+    name.trim()
+
+
+  if (
+    /^v[âa]rful\s+/i
+      .test(
+        trimmed
+      )
+  ) {
+
+    return trimmed
+
+  }
+
+
+  if (
+    /\speak$/i
+      .test(
+        trimmed
+      )
+  ) {
+
+    return (
+      `Vârful ${
+        trimmed
+          .replace(
+            /\speak$/i,
+            ''
+          )
+          .trim()
+      }`
+    )
+
+  }
+
+
+  return (
+    `Vârful ${trimmed}`
+  )
+
+}
+
+
+// =====================================================
+// AFIȘARE NUME MASIV
+// =====================================================
+
+function humanizeRangeName(
+  name: string
+) {
+
+  const trimmed =
+    name.trim()
+
+
+  if (
+    /^munții\s+/i
+      .test(trimmed)
+    ||
+    /^muntii\s+/i
+      .test(trimmed)
+  ) {
+
+    return trimmed
+
+  }
+
+
+  if (
+    /^masivul\s+/i
+      .test(trimmed)
+  ) {
+
+    return trimmed
+
+  }
+
+
+  if (
+    /\smountains$/i
+      .test(trimmed)
+  ) {
+
+    return (
+      `Munții ${
+        trimmed
+          .replace(
+            /\smountains$/i,
+            ''
+          )
+          .trim()
+      }`
+    )
+
+  }
+
+
+  if (
+    /\smountain range$/i
+      .test(trimmed)
+  ) {
+
+    return (
+      `Munții ${
+        trimmed
+          .replace(
+            /\smountain range$/i,
+            ''
+          )
+          .trim()
+      }`
+    )
+
+  }
+
+
+  if (
+    /\smassif$/i
+      .test(trimmed)
+  ) {
+
+    return (
+      `Masivul ${
+        trimmed
+          .replace(
+            /\smassif$/i,
+            ''
+          )
+          .trim()
+      }`
+    )
+
+  }
+
+
+  return trimmed
+
+}
+
+
+// =====================================================
+// EXTRAGEM MASIVUL DIN ÎNTREBARE
+// =====================================================
+
+function extractRangeHint(
+  question: string
+) {
+
+  const text =
+    plainNormalize(
+      question
+    )
+
+
+  const patterns = [
+
+    /*
+      Ce altitudine are Vf Greci
+      din Munții Măcin?
+    */
+
+    /\b(?:din|in)\s+(?:muntii|masivul|masiv)\s+(.+?)(?:\s+(?:am|ai|este|sunt|se|pe care|vizitat|vizitate)\b|$)/,
+
+
+    /*
+      Ce vârfuri din Făgăraș
+      am vizitat?
+    */
+
+    /\bdin\s+(.+?)\s+(?:am|ai|vizitat|vizitate)\b/
+
+  ]
+
+
+  for (
+    const pattern
+    of patterns
+  ) {
+
+    const match =
+      text.match(
+        pattern
+      )
+
+
+    if (
+      match?.[1]
+    ) {
+
+      const value =
+        normalizeRangeName(
+          match[1]
+        )
+
+
+      if (value) {
+
+        return value
+
+      }
+
+    }
+
+  }
+
+
+  return null
+
+}
+
+
+// =====================================================
+// SCOATEM PARTEA CU MASIVUL DIN NUMELE VÂRFULUI
+// =====================================================
+
+function removeRangeHintFromText(
+  text: string
+) {
+
+  return text
+
+    .replace(
+      /\b(?:din|in)\s+(?:muntii|masivul|masiv)\s+.+$/,
+      ' '
+    )
+
+    .replace(
+      /\s+/g,
+      ' '
+    )
+
+    .trim()
+
+}
+
+
+// =====================================================
+// EXTRAGEM NUMELE VÂRFULUI DIN ÎNTREBARE
+// =====================================================
+
+function extractPeakName(
+  question: string
+) {
+
+  let text =
+    normalizeText(
+      question
+    )
+
+
+  text =
+    removeRangeHintFromText(
+      text
+    )
+
+
+  const phrases = [
+
+    'ce altitudine are',
+
+    'care este altitudinea',
+
+    'care e altitudinea',
+
+    'ce inaltime are',
+
+    'care este inaltimea',
+
+    'care e inaltimea',
+
+    'cat de inalt este',
+
+    'cat de inalt e',
+
+    'cat de inalt',
+
+    'in ce masiv se afla',
+
+    'in ce masiv este',
+
+    'in ce munti se afla',
+
+    'in ce munti este',
+
+    'din ce masiv face parte',
+
+    'din ce masiv este',
+
+    'din ce munti face parte',
+
+    'ce masiv are',
+
+    'ce coordonate are',
+
+    'care sunt coordonatele',
+
+    'unde se afla',
+
+    'unde este',
+
+    'unde e',
+
+    'am fost pe',
+
+    'am fost la',
+
+    'am vizitat',
+
+    'spune mi',
+
+    'spunemi',
+
+    'te rog',
+
+    'muntele',
+
+    'munte',
+
+    'vf',
+
+    'dar',
+
+    'iar',
+
+    'si'
+
+  ]
+
+
+  for (
+    const phrase
+    of phrases
+  ) {
+
+    text =
+      text.replace(
+        phrase,
+        ' '
+      )
+
+  }
+
+
+  return normalizePeakName(
+    text
+  )
+
+}
+
+
+// =====================================================
+// EXTRAGEM VÂRFUL DIN TEXTUL UNEI VIZITE
+// =====================================================
+
+function extractPeakNameFromVisit(
+  visit: Visit
+) {
+
+  const text =
+    `${visit.place_name ?? ''} ${visit.location_details ?? ''}`
+
+
+  const match =
+    text.match(
+      /(?:Vârful|Varful|Vf\.?)\s+([^,;()–—-]+)/i
+    )
+
+
+  if (
+    match?.[1]
+  ) {
+
+    const result =
+      match[1]
+        .trim()
+
+
+    if (
+      result.length >=
+      2
+    ) {
+
+      return result
+
+    }
+
+  }
+
+
+  if (
+    visit.is_peak
+    &&
+    visit.place_name
+  ) {
+
+    return visit.place_name
+
+  }
+
+
+  return null
 
 }
 
@@ -340,7 +904,8 @@ function parseElevation(
 ): number | null {
 
   if (
-    value === undefined ||
+    value === undefined
+    ||
     value === null
   ) {
 
@@ -351,11 +916,13 @@ function parseElevation(
 
   const parsed =
     Number.parseFloat(
+
       String(value)
         .replace(
           ',',
           '.'
         )
+
     )
 
 
@@ -382,10 +949,15 @@ function parseElevation(
 // =====================================================
 
 function calculateDistance(
+
   lat1: number,
+
   lon1: number,
+
   lat2: number,
+
   lon2: number
+
 ) {
 
   const earthRadius =
@@ -425,38 +997,56 @@ function calculateDistance(
 
 
   const a =
+
     Math.sin(
       deltaLat / 2
     )
+
     *
+
     Math.sin(
       deltaLat / 2
     )
+
     +
+
     Math.cos(
       lat1Rad
     )
+
     *
+
     Math.cos(
       lat2Rad
     )
+
     *
+
     Math.sin(
       deltaLon / 2
     )
+
     *
+
     Math.sin(
       deltaLon / 2
     )
 
 
   const c =
-    2 *
+
+    2
+
+    *
+
     Math.atan2(
+
       Math.sqrt(a),
+
       Math.sqrt(
         1 - a
       )
+
     )
 
 
@@ -473,9 +1063,15 @@ function calculateDistance(
 // =====================================================
 
 async function fetchWithTimeout(
+
   url: string,
-  options: RequestInit = {},
-  timeout = REQUEST_TIMEOUT
+
+  options:
+    RequestInit = {},
+
+  timeout =
+    REQUEST_TIMEOUT
+
 ) {
 
   const controller =
@@ -484,25 +1080,30 @@ async function fetchWithTimeout(
 
   const timer =
     window.setTimeout(
-      () => {
 
-        controller.abort()
+      () =>
+        controller.abort(),
 
-      },
       timeout
+
     )
 
 
   try {
 
     return await fetch(
+
       url,
+
       {
+
         ...options,
 
         signal:
           controller.signal
+
       }
+
     )
 
   }
@@ -519,409 +1120,36 @@ async function fetchWithTimeout(
 
 
 // =====================================================
-// NUME VÂRF OSM
-// =====================================================
-
-function getPeakName(
-  peak: OsmPeak
-) {
-
-  return (
-    peak.tags?.['name:ro']
-    ||
-    peak.tags?.name
-    ||
-    peak.tags?.alt_name
-    ||
-    'Vârf fără nume'
-  )
-
-}
-
-
-// =====================================================
-// ESCAPE REGEX
-// =====================================================
-
-function escapeRegex(
-  text: string
-) {
-
-  return text.replace(
-    /[.*+?^${}()|[\]\\]/g,
-    '\\$&'
-  )
-
-}
-
-
-// =====================================================
-// SCOR NUME
-// =====================================================
-
-function getNameMatchScore(
-  candidateName: string,
-  requestedName: string
-) {
-
-  const candidate =
-    normalizePeakName(
-      candidateName
-    )
-
-
-  const requested =
-    normalizePeakName(
-      requestedName
-    )
-
-
-  if (
-    !candidate ||
-    !requested
-  ) {
-
-    return 100
-
-  }
-
-
-  if (
-    candidate ===
-    requested
-  ) {
-
-    return 0
-
-  }
-
-
-  if (
-    candidate.startsWith(
-      requested
-    )
-  ) {
-
-    return 1
-
-  }
-
-
-  if (
-    candidate.includes(
-      requested
-    )
-  ) {
-
-    return 2
-
-  }
-
-
-  if (
-    requested.includes(
-      candidate
-    )
-  ) {
-
-    return 3
-
-  }
-
-
-  const candidateWords =
-    candidate
-      .split(' ')
-      .filter(
-        Boolean
-      )
-
-
-  const requestedWords =
-    requested
-      .split(' ')
-      .filter(
-        Boolean
-      )
-
-
-  const commonWords =
-    requestedWords.filter(
-      (word) =>
-        candidateWords.includes(
-          word
-        )
-    )
-
-
-  if (
-    commonWords.length >
-    0
-  ) {
-
-    return 10
-
-  }
-
-
-  return 100
-
-}
-
-
-// =====================================================
-// EXTRAGEM NUMELE VÂRFULUI DIN ÎNTREBARE
-// =====================================================
-
-function extractPeakName(
-  question: string
-) {
-
-  let text =
-    normalizeText(
-      question
-    )
-
-
-  const phrases = [
-    'ce altitudine are',
-    'care este altitudinea',
-    'care e altitudinea',
-
-    'ce inaltime are',
-    'care este inaltimea',
-    'care e inaltimea',
-
-    'cat de inalt este',
-    'cat de inalt e',
-    'cat de inalt',
-
-    'unde este',
-    'unde e',
-    'unde se afla',
-
-    'am fost pe',
-    'am fost la',
-    'am vizitat',
-
-    'spune mi',
-    'spunemi',
-
-    'altitudinea',
-    'altitudine',
-
-    'inaltimea',
-    'inaltime',
-
-    'te rog',
-
-    'vf'
-  ]
-
-
-  for (
-    const phrase
-    of phrases
-  ) {
-
-    text =
-      text.replace(
-        phrase,
-        ' '
-      )
-
-  }
-
-
-  return text
-    .replace(
-      /\s+/g,
-      ' '
-    )
-    .trim()
-
-}
-
-
-// =====================================================
-// EXTRAGEM NUMELE VÂRFULUI DINTR-O VIZITĂ
-// =====================================================
-
-function extractPeakNameFromVisit(
-  visit: Visit
-) {
-
-  const text =
-    `${visit.place_name ?? ''} ${visit.location_details ?? ''}`
-
-
-  /*
-    Exemple:
-
-    Vârful Omu
-    Varful Omu
-    Vf. Omu
-  */
-
-  const match =
-    text.match(
-      /(?:Vârful|Varful|Vf\.?)\s+([^,;()–—-]+)/i
-    )
-
-
-  if (
-    match?.[1]
-  ) {
-
-    const result =
-      match[1]
-        .trim()
-
-
-    if (
-      result.length >=
-      2
-    ) {
-
-      return result
-
-    }
-
-  }
-
-
-  if (
-    visit.is_peak &&
-    visit.place_name
-  ) {
-
-    return visit.place_name
-
-  }
-
-
-  return null
-
-}
-
-
-// =====================================================
-// OVERPASS CU FALLBACK
-// =====================================================
-
-async function runOverpassQuery(
-  query: string
-): Promise<OsmPeak[]> {
-
-  let lastError:
-    unknown = null
-
-
-  for (
-    const url
-    of OVERPASS_URLS
-  ) {
-
-    try {
-
-      const response =
-        await fetchWithTimeout(
-          url,
-          {
-            method:
-              'POST',
-
-            headers: {
-              'Content-Type':
-                'application/x-www-form-urlencoded'
-            },
-
-            body:
-              new URLSearchParams({
-                data:
-                  query
-              })
-          }
-        )
-
-
-      if (
-        !response.ok
-      ) {
-
-        throw new Error(
-          `Overpass HTTP ${response.status}`
-        )
-
-      }
-
-
-      const data =
-        await response.json()
-
-
-      return (
-        data.elements ??
-        []
-      )
-
-    }
-
-    catch (error) {
-
-      lastError =
-        error
-
-
-      console.log(
-        `Overpass indisponibil: ${url}`,
-        error
-      )
-
-    }
-
-  }
-
-
-  throw (
-    lastError
-    ??
-    new Error(
-      'Overpass indisponibil.'
-    )
-  )
-
-}
-
-
-// =====================================================
-// OPEN-METEO - ELEVAȚIE DUPĂ COORDONATE
+// OPEN-METEO - ALTITUDINE DUPĂ COORDONATE
 // =====================================================
 
 async function getOpenMeteoElevation(
+
   latitude: number,
+
   longitude: number
+
 ): Promise<number | null> {
 
   try {
 
     const params =
       new URLSearchParams({
+
         latitude:
-          String(
-            latitude
-          ),
+          String(latitude),
 
         longitude:
-          String(
-            longitude
-          )
+          String(longitude)
+
       })
 
 
     const response =
       await fetchWithTimeout(
+
         `${OPEN_METEO_ELEVATION_URL}?${params.toString()}`
+
       )
 
 
@@ -934,8 +1162,7 @@ async function getOpenMeteoElevation(
     }
 
 
-    const data:
-      OpenMeteoElevationResponse =
+    const data =
       await response.json()
 
 
@@ -959,7 +1186,7 @@ async function getOpenMeteoElevation(
   catch (error) {
 
     console.log(
-      'Open-Meteo elevation error:',
+      'Open-Meteo elevation:',
       error
     )
 
@@ -972,113 +1199,915 @@ async function getOpenMeteoElevation(
 
 
 // =====================================================
-// SCOR PENTRU REZULTAT OPEN-METEO
+// WIKIDATA SEARCH
 // =====================================================
 
-function scoreOpenMeteoLocation(
-  location: OpenMeteoLocation,
-  requestedName: string
-) {
+async function wikidataSearch(
 
-  const name =
-    location.name ??
-    ''
+  search: string,
+
+  language:
+    'ro' | 'en'
+
+): Promise<WikidataSearchResult[]> {
+
+  const params =
+    new URLSearchParams({
+
+      action:
+        'wbsearchentities',
+
+      search:
+        search,
+
+      language:
+        language,
+
+      uselang:
+        language,
+
+      type:
+        'item',
+
+      limit:
+        '15',
+
+      format:
+        'json',
+
+      /*
+        Permite apelarea API-ului
+        direct din React/browser.
+      */
+
+      origin:
+        '*'
+
+    })
 
 
-  let score =
-    getNameMatchScore(
-      name,
-      requestedName
+  const response =
+    await fetchWithTimeout(
+
+      `${WIKIDATA_API_URL}?${params.toString()}`
+
     )
 
 
-  const featureCode =
-    String(
-      location.feature_code ??
-      ''
-    )
-      .toUpperCase()
-
-
-  /*
-    GeoNames folosește feature_code.
-
-    PK / PKS = peak(s)
-    MT = mountain
-  */
-
   if (
-    featureCode ===
-    'PK'
+    !response.ok
   ) {
 
-    score -=
-      50
+    return []
 
   }
 
 
-  if (
-    featureCode ===
-    'PKS'
-  ) {
-
-    score -=
-      40
-
-  }
+  const data =
+    await response.json()
 
 
-  if (
-    featureCode ===
-    'MT'
-  ) {
-
-    score -=
-      30
-
-  }
-
-
-  if (
-    featureCode.startsWith(
-      'PK'
-    )
-  ) {
-
-    score -=
-      20
-
-  }
-
-
-  if (
-    String(
-      location.country_code ??
-      ''
-    )
-      .toUpperCase() ===
-    'RO'
-  ) {
-
-    score -=
-      5
-
-  }
-
-
-  return score
+  return Array.isArray(
+    data.search
+  )
+    ? data.search
+    : []
 
 }
 
 
 // =====================================================
-// OPEN-METEO - CĂUTARE VÂRF DUPĂ NUME
+// WIKIDATA GET ENTITIES
 // =====================================================
 
-async function findPeakWithOpenMeteo(
-  requestedName: string
-): Promise<PeakLookupResult | null> {
+async function getWikidataEntities(
+  ids: string[]
+): Promise<WikidataEntity[]> {
+
+  const uniqueIds =
+    Array.from(
+      new Set(ids)
+    )
+      .filter(Boolean)
+
+
+  if (
+    uniqueIds.length ===
+    0
+  ) {
+
+    return []
+
+  }
+
+
+  const result:
+    WikidataEntity[] = []
+
+
+  const chunkSize =
+    40
+
+
+  for (
+    let index = 0;
+
+    index <
+    uniqueIds.length;
+
+    index +=
+    chunkSize
+  ) {
+
+    const chunk =
+      uniqueIds.slice(
+
+        index,
+
+        index +
+        chunkSize
+
+      )
+
+
+    const params =
+      new URLSearchParams({
+
+        action:
+          'wbgetentities',
+
+        ids:
+          chunk.join('|'),
+
+        props:
+          'labels|descriptions|aliases|claims',
+
+        languages:
+          'ro|en',
+
+        languagefallback:
+          '1',
+
+        format:
+          'json',
+
+        origin:
+          '*'
+
+      })
+
+
+    const response =
+      await fetchWithTimeout(
+
+        `${WIKIDATA_API_URL}?${params.toString()}`
+
+      )
+
+
+    if (
+      !response.ok
+    ) {
+
+      continue
+
+    }
+
+
+    const data =
+      await response.json()
+
+
+    if (
+      !data.entities
+    ) {
+
+      continue
+
+    }
+
+
+    for (
+      const id
+      of chunk
+    ) {
+
+      const entity =
+        data.entities[id]
+
+
+      if (
+        entity
+        &&
+        !entity.missing
+      ) {
+
+        result.push(
+          entity
+        )
+
+      }
+
+    }
+
+  }
+
+
+  return result
+
+}
+
+
+// =====================================================
+// LABEL PREFERAT
+// =====================================================
+
+function getPreferredEntityLabel(
+  entity: WikidataEntity
+) {
+
+  return (
+
+    entity.labels
+      ?.ro
+      ?.value
+
+    ||
+
+    entity.labels
+      ?.en
+      ?.value
+
+    ||
+
+    entity.id
+
+  )
+
+}
+
+
+// =====================================================
+// TOATE NUMELE / ALIASURILE
+// =====================================================
+
+function getEntityNames(
+  entity: WikidataEntity
+) {
+
+  const names =
+    new Set<string>()
+
+
+  if (
+    entity.labels
+      ?.ro
+      ?.value
+  ) {
+
+    names.add(
+      entity.labels.ro.value
+    )
+
+  }
+
+
+  if (
+    entity.labels
+      ?.en
+      ?.value
+  ) {
+
+    names.add(
+      entity.labels.en.value
+    )
+
+  }
+
+
+  for (
+    const alias
+    of entity.aliases?.ro ??
+    []
+  ) {
+
+    names.add(
+      alias.value
+    )
+
+  }
+
+
+  for (
+    const alias
+    of entity.aliases?.en ??
+    []
+  ) {
+
+    names.add(
+      alias.value
+    )
+
+  }
+
+
+  return Array.from(
+    names
+  )
+
+}
+
+
+// =====================================================
+// CLAIM DE TIP ITEM
+// =====================================================
+
+function getItemClaimIds(
+
+  entity:
+    WikidataEntity,
+
+  propertyId:
+    string
+
+) {
+
+  const claims =
+    entity.claims
+      ?.[propertyId]
+    ??
+    []
+
+
+  return claims
+
+    .map(
+      (claim: any) =>
+
+        claim
+          ?.mainsnak
+          ?.datavalue
+          ?.value
+          ?.id
+
+    )
+
+    .filter(
+      (
+        value: unknown
+      ): value is string =>
+
+        typeof value ===
+        'string'
+    )
+
+}
+
+
+// =====================================================
+// CLAIM CANTITATIV
+// =====================================================
+
+function getQuantityClaim(
+
+  entity:
+    WikidataEntity,
+
+  propertyId:
+    string
+
+) {
+
+  const claims =
+    entity.claims
+      ?.[propertyId]
+    ??
+    []
+
+
+  for (
+    const claim
+    of claims
+  ) {
+
+    const amount =
+      claim
+        ?.mainsnak
+        ?.datavalue
+        ?.value
+        ?.amount
+
+
+    const parsed =
+      parseElevation(
+        amount
+      )
+
+
+    if (
+      parsed !==
+      null
+    ) {
+
+      return parsed
+
+    }
+
+  }
+
+
+  return null
+
+}
+
+
+// =====================================================
+// COORDONATE WIKIDATA
+// =====================================================
+
+function getCoordinateClaim(
+  entity: WikidataEntity
+) {
+
+  const claims =
+    entity.claims
+      ?.P625
+    ??
+    []
+
+
+  for (
+    const claim
+    of claims
+  ) {
+
+    const value =
+      claim
+        ?.mainsnak
+        ?.datavalue
+        ?.value
+
+
+    const latitude =
+      Number(
+        value?.latitude
+      )
+
+
+    const longitude =
+      Number(
+        value?.longitude
+      )
+
+
+    if (
+      Number.isFinite(
+        latitude
+      )
+      &&
+      Number.isFinite(
+        longitude
+      )
+    ) {
+
+      return {
+
+        latitude,
+
+        longitude
+
+      }
+
+    }
+
+  }
+
+
+  return null
+
+}
+
+
+// =====================================================
+// REZOLVĂM QID -> NUME
+// =====================================================
+
+async function resolveWikidataLabels(
+  ids: string[]
+) {
+
+  const unique =
+    Array.from(
+      new Set(ids)
+    )
+      .filter(Boolean)
+
+
+  const missing =
+    unique.filter(
+
+      (id) =>
+        !wikidataLabelCache
+          .has(id)
+
+    )
+
+
+  if (
+    missing.length >
+    0
+  ) {
+
+    const entities =
+      await getWikidataEntities(
+        missing
+      )
+
+
+    for (
+      const entity
+      of entities
+    ) {
+
+      wikidataLabelCache.set(
+
+        entity.id,
+
+        getPreferredEntityLabel(
+          entity
+        )
+
+      )
+
+    }
+
+  }
+
+
+  const result =
+    new Map<
+      string,
+      string
+    >()
+
+
+  for (
+    const id
+    of unique
+  ) {
+
+    const label =
+      wikidataLabelCache
+        .get(id)
+
+
+    if (label) {
+
+      result.set(
+        id,
+        label
+      )
+
+    }
+
+  }
+
+
+  return result
+
+}
+
+
+// =====================================================
+// SCOR NUME
+// =====================================================
+
+function getNameMatchScore(
+
+  candidateName:
+    string,
+
+  requestedName:
+    string
+
+) {
+
+  const candidate =
+    normalizePeakName(
+      candidateName
+    )
+
+
+  const requested =
+    normalizePeakName(
+      requestedName
+    )
+
+
+  if (
+    !candidate
+    ||
+    !requested
+  ) {
+
+    return 100
+
+  }
+
+
+  /*
+    Negoiu === Negoiu
+  */
+
+  if (
+    candidate ===
+    requested
+  ) {
+
+    return 0
+
+  }
+
+
+  /*
+    Negoiu Mic pentru Negoiu
+    NU este match exact.
+  */
+
+  if (
+    candidate.startsWith(
+      `${requested} `
+    )
+  ) {
+
+    return 2
+
+  }
+
+
+  if (
+    candidate.includes(
+      requested
+    )
+  ) {
+
+    return 4
+
+  }
+
+
+  if (
+    requested.includes(
+      candidate
+    )
+  ) {
+
+    return 6
+
+  }
+
+
+  const candidateWords =
+    candidate
+      .split(' ')
+
+
+  const requestedWords =
+    requested
+      .split(' ')
+
+
+  const commonWords =
+    requestedWords
+      .filter(
+
+        (word) =>
+          candidateWords
+            .includes(
+              word
+            )
+
+      )
+
+
+  if (
+    commonWords.length >
+    0
+  ) {
+
+    return 20
+
+  }
+
+
+  return 100
+
+}
+
+
+// =====================================================
+// SCOR MASIV
+// =====================================================
+
+function getRangeMatchScore(
+
+  candidateRanges:
+    string[],
+
+  rangeHint:
+    string | null
+
+) {
+
+  if (
+    !rangeHint
+  ) {
+
+    return 0
+
+  }
+
+
+  const wanted =
+    normalizeRangeName(
+      rangeHint
+    )
+
+
+  for (
+    const range
+    of candidateRanges
+  ) {
+
+    const candidate =
+      normalizeRangeName(
+        range
+      )
+
+
+    if (
+      candidate ===
+      wanted
+      ||
+      candidate.includes(
+        wanted
+      )
+      ||
+      wanted.includes(
+        candidate
+      )
+    ) {
+
+      /*
+        Bonus mare dacă masivul
+        este cel cerut.
+
+        Ex:
+        Greci + Măcin.
+      */
+
+      return -700
+
+    }
+
+  }
+
+
+  return 250
+
+}
+
+
+// =====================================================
+// PARE A FI MUNTE?
+// =====================================================
+
+function looksLikeMountainText(
+  text: string
+) {
+
+  const normalized =
+    plainNormalize(
+      text
+    )
+
+
+  return (
+
+    normalized.includes(
+      'mountain'
+    )
+
+    ||
+
+    normalized.includes(
+      'peak'
+    )
+
+    ||
+
+    normalized.includes(
+      'summit'
+    )
+
+    ||
+
+    normalized.includes(
+      'varf'
+    )
+
+    ||
+
+    normalized.includes(
+      'munte'
+    )
+
+  )
+
+}
+
+
+// =====================================================
+// PARE A FI LOCALITATE?
+// =====================================================
+
+function looksLikeSettlementText(
+  text: string
+) {
+
+  const normalized =
+    plainNormalize(
+      text
+    )
+
+
+  return (
+
+    normalized.includes(
+      'village'
+    )
+
+    ||
+
+    normalized.includes(
+      'commune'
+    )
+
+    ||
+
+    normalized.includes(
+      'city'
+    )
+
+    ||
+
+    normalized.includes(
+      'town'
+    )
+
+    ||
+
+    normalized.includes(
+      'municipality'
+    )
+
+    ||
+
+    normalized.includes(
+      'sat'
+    )
+
+    ||
+
+    normalized.includes(
+      'comuna'
+    )
+
+    ||
+
+    normalized.includes(
+      'oras'
+    )
+
+  )
+
+}
+
+
+// =====================================================
+// WIKIDATA - GĂSIM VÂRFUL CORECT
+// =====================================================
+
+async function findWikidataPeakEntity(
+
+  requestedName:
+    string,
+
+  rangeHint:
+    string | null =
+      null
+
+): Promise<WikidataEntity | null> {
 
   const cleanName =
     normalizePeakName(
@@ -1086,7 +2115,9 @@ async function findPeakWithOpenMeteo(
     )
 
 
-  if (!cleanName) {
+  if (
+    !cleanName
+  ) {
 
     return null
 
@@ -1094,115 +2125,104 @@ async function findPeakWithOpenMeteo(
 
 
   /*
-    Încercăm două forme.
+    Căutăm mai multe formulări.
 
-    De obicei:
-    "Negoiu"
-
-    este mai bun decât:
-    "Vârful Negoiu".
+    Important pentru:
+    Negoiu
+    Omu
+    Greci
+    Moldoveanu etc.
   */
 
-  const searchVariants = [
-    cleanName,
-    `Vârful ${cleanName}`
-  ]
+  const variants =
+    new Set<string>([
+
+      cleanName,
+
+      `Vârful ${cleanName}`,
+
+      `${cleanName} peak`,
+
+      `${cleanName} mountain`
+
+    ])
 
 
-  let allResults:
-    OpenMeteoLocation[] = []
-
-
-  for (
-    const searchName
-    of searchVariants
+  if (
+    rangeHint
   ) {
 
-    try {
-
-      const params =
-        new URLSearchParams({
-          name:
-            searchName,
-
-          count:
-            '30',
-
-          language:
-            'ro',
-
-          format:
-            'json',
-
-          countryCode:
-            'RO'
-        })
+    variants.add(
+      `${cleanName} ${rangeHint}`
+    )
 
 
-      const response =
-        await fetchWithTimeout(
-          `${OPEN_METEO_GEOCODING_URL}?${params.toString()}`
-        )
-
-
-      if (
-        !response.ok
-      ) {
-
-        continue
-
-      }
-
-
-      const data:
-        OpenMeteoSearchResponse =
-        await response.json()
-
-
-      if (
-        Array.isArray(
-          data.results
-        )
-      ) {
-
-        allResults.push(
-          ...data.results
-        )
-
-      }
-
-    }
-
-    catch (error) {
-
-      console.log(
-        'Open-Meteo geocoding error:',
-        error
-      )
-
-    }
-
-
-    /*
-      Dacă prima căutare a dat
-      rezultate, nu mai facem inutil
-      încă un request.
-    */
-
-    if (
-      allResults.length >
-      0
-    ) {
-
-      break
-
-    }
+    variants.add(
+      `Vârful ${cleanName} ${rangeHint}`
+    )
 
   }
 
 
+  const searchResults:
+    WikidataSearchResult[] =
+    []
+
+
+  for (
+    const variant
+    of variants
+  ) {
+
+    const [
+      romanianResults,
+      englishResults
+    ] =
+      await Promise.all([
+
+        wikidataSearch(
+          variant,
+          'ro'
+        ),
+
+        wikidataSearch(
+          variant,
+          'en'
+        )
+
+      ])
+
+
+    searchResults.push(
+      ...romanianResults,
+      ...englishResults
+    )
+
+  }
+
+
+  const ids =
+    Array.from(
+
+      new Set(
+
+        searchResults
+          .map(
+            (item) =>
+              item.id
+          )
+
+      )
+
+    )
+      .slice(
+        0,
+        30
+      )
+
+
   if (
-    allResults.length ===
+    ids.length ===
     0
   ) {
 
@@ -1211,68 +2231,313 @@ async function findPeakWithOpenMeteo(
   }
 
 
-  // ===================================================
-  // ELIMINĂM DUPLICATE
-  // ===================================================
+  const entities =
+    await getWikidataEntities(
+      ids
+    )
 
-  const uniqueResults =
-    new Map<
-      string,
-      OpenMeteoLocation
-    >()
+
+  /*
+    Avem nevoie și de numele
+    tipurilor și masivelor.
+  */
+
+  const relatedIds =
+    new Set<string>()
 
 
   for (
-    const result
-    of allResults
+    const entity
+    of entities
   ) {
 
-    const key =
-      `${result.id ?? ''}-${result.latitude ?? ''}-${result.longitude ?? ''}`
+    for (
+      const id
+      of getItemClaimIds(
+        entity,
+        'P31'
+      )
+    ) {
+
+      relatedIds.add(id)
+
+    }
 
 
-    uniqueResults.set(
-      key,
-      result
-    )
+    for (
+      const id
+      of getItemClaimIds(
+        entity,
+        'P4552'
+      )
+    ) {
+
+      relatedIds.add(id)
+
+    }
+
+
+    for (
+      const id
+      of getItemClaimIds(
+        entity,
+        'P706'
+      )
+    ) {
+
+      relatedIds.add(id)
+
+    }
 
   }
 
 
-  // ===================================================
-  // SORTARE
-  // ===================================================
+  const labels =
+    await resolveWikidataLabels(
 
-  const ranked =
-    Array.from(
-      uniqueResults.values()
-    )
-
-      .filter(
-        (item) =>
-          Number.isFinite(
-            Number(
-              item.latitude
-            )
-          )
-          &&
-          Number.isFinite(
-            Number(
-              item.longitude
-            )
-          )
+      Array.from(
+        relatedIds
       )
 
-      .map(
-        (item) => ({
-          item,
+    )
 
-          score:
-            scoreOpenMeteoLocation(
-              item,
-              cleanName
+
+  const ranked =
+    entities
+
+      .map(
+        (entity) => {
+
+          const names =
+            getEntityNames(
+              entity
             )
-        })
+
+
+          /*
+            Cel mai bun scor
+            dintre label și aliases.
+          */
+
+          const nameScore =
+            Math.min(
+
+              ...names.map(
+                (name) =>
+                  getNameMatchScore(
+                    name,
+                    cleanName
+                  )
+              ),
+
+              100
+
+            )
+
+
+          const description =
+            [
+
+              entity.descriptions
+                ?.ro
+                ?.value
+              ??
+              '',
+
+              entity.descriptions
+                ?.en
+                ?.value
+              ??
+              ''
+
+            ]
+              .join(' ')
+
+
+          const instanceLabels =
+            getItemClaimIds(
+              entity,
+              'P31'
+            )
+              .map(
+                (id) =>
+                  labels.get(id)
+                  ??
+                  ''
+              )
+
+
+          const rangeIds =
+            [
+
+              ...getItemClaimIds(
+                entity,
+                'P4552'
+              ),
+
+              ...getItemClaimIds(
+                entity,
+                'P706'
+              )
+
+            ]
+
+
+          const rangeLabels =
+            rangeIds
+
+              .map(
+                (id) =>
+                  labels.get(id)
+                  ??
+                  ''
+              )
+
+              .filter(Boolean)
+
+
+          const hasElevation =
+
+            getQuantityClaim(
+              entity,
+              'P2044'
+            )
+            !==
+            null
+
+
+          const hasCoordinates =
+
+            getCoordinateClaim(
+              entity
+            )
+            !==
+            null
+
+
+          const typeText =
+            [
+
+              description,
+
+              ...instanceLabels
+
+            ]
+              .join(' ')
+
+
+          const mountainLike =
+
+            looksLikeMountainText(
+              typeText
+            )
+
+            ||
+
+            rangeLabels.length >
+            0
+
+
+          const settlementLike =
+            looksLikeSettlementText(
+              typeText
+            )
+
+
+          /*
+            Scor mai mic =
+            rezultat mai bun.
+          */
+
+          let score =
+            nameScore *
+            100
+
+
+          /*
+            Preferăm clar
+            obiectele montane.
+          */
+
+          if (
+            mountainLike
+          ) {
+
+            score -=
+              550
+
+          }
+
+
+          /*
+            Penalizăm sate,
+            comune, orașe etc.
+          */
+
+          if (
+            settlementLike
+          ) {
+
+            score +=
+              900
+
+          }
+
+
+          if (
+            hasElevation
+          ) {
+
+            score -=
+              180
+
+          }
+
+
+          if (
+            hasCoordinates
+          ) {
+
+            score -=
+              80
+
+          }
+
+
+          if (
+            rangeLabels.length >
+            0
+          ) {
+
+            score -=
+              120
+
+          }
+
+
+          score +=
+            getRangeMatchScore(
+
+              rangeLabels,
+
+              rangeHint
+
+            )
+
+
+          return {
+
+            entity,
+
+            score,
+
+            nameScore,
+
+            mountainLike
+
+          }
+
+        }
       )
 
       .sort(
@@ -1282,8 +2547,26 @@ async function findPeakWithOpenMeteo(
       )
 
 
+  const best =
+    ranked[0]
+
+
+  if (!best) {
+
+    return null
+
+  }
+
+
+  /*
+    Protecție suplimentară:
+    nu vrem un sat/localitate.
+  */
+
   if (
-    ranked.length ===
+    !best.mountainLike
+    &&
+    best.nameScore >
     0
   ) {
 
@@ -1292,85 +2575,224 @@ async function findPeakWithOpenMeteo(
   }
 
 
+  return best.entity
+
+}
+
+
+// =====================================================
+// CONSTRUIM DATELE VÂRFULUI DIN WIKIDATA
+// =====================================================
+
+async function buildPeakFactsFromWikidata(
+  entity: WikidataEntity
+): Promise<PeakFacts> {
+
+  const name =
+    getPreferredEntityLabel(
+      entity
+    )
+
+
   /*
-    Nu acceptăm un rezultat care
-    nu seamănă deloc cu numele.
+    P2044 = elevation above sea level
   */
 
-  const acceptable =
-    ranked.find(
-      (candidate) =>
-        candidate.score <
-        100
-    )
-
-
-  const best =
-    acceptable
-    ??
-    ranked[0]
-
-
-  if (
-    !best
-  ) {
-
-    return null
-
-  }
-
-
-  const latitude =
-    Number(
-      best.item.latitude
-    )
-
-
-  const longitude =
-    Number(
-      best.item.longitude
-    )
-
-
-  if (
-    !Number.isFinite(
-      latitude
-    )
-    ||
-    !Number.isFinite(
-      longitude
-    )
-  ) {
-
-    return null
-
-  }
-
-
   let elevation =
-    parseElevation(
-      best.item.elevation
+    getQuantityClaim(
+      entity,
+      'P2044'
     )
+
+
+  /*
+    P625 = coordinates
+  */
+
+  const coordinates =
+    getCoordinateClaim(
+      entity
+    )
+
+
+  /*
+    P4552 = mountain range
+  */
+
+  const rangeIds =
+    getItemClaimIds(
+      entity,
+      'P4552'
+    )
+
+
+  /*
+    P706 poate apărea ca
+    physical feature.
+  */
+
+  const physicalFeatureIds =
+    getItemClaimIds(
+      entity,
+      'P706'
+    )
+
+
+  /*
+    P131 = administrative location
+  */
+
+  const locationIds =
+    getItemClaimIds(
+      entity,
+      'P131'
+    )
+
+
+  /*
+    P17 = country
+  */
+
+  const countryIds =
+    getItemClaimIds(
+      entity,
+      'P17'
+    )
+
+
+  const allRelated =
+    [
+
+      ...rangeIds,
+
+      ...physicalFeatureIds,
+
+      ...locationIds,
+
+      ...countryIds
+
+    ]
+
+
+  const labels =
+    await resolveWikidataLabels(
+      allRelated
+    )
+
+
+  let mountainRanges =
+    rangeIds
+
+      .map(
+        (id) =>
+          labels.get(id)
+      )
+
+      .filter(
+        (
+          value
+        ): value is string =>
+          Boolean(value)
+      )
+
+
+  /*
+    Dacă P4552 lipsește,
+    încercăm P706.
+  */
+
+  if (
+    mountainRanges.length ===
+    0
+  ) {
+
+    mountainRanges =
+      physicalFeatureIds
+
+        .map(
+          (id) =>
+            labels.get(id)
+        )
+
+        .filter(
+          (
+            value
+          ): value is string =>
+            Boolean(value)
+        )
+
+        .filter(
+          (label) =>
+            looksLikeMountainText(
+              label
+            )
+        )
+
+  }
+
+
+  mountainRanges =
+    mountainRanges
+      .map(
+        humanizeRangeName
+      )
+
+
+  const locations =
+    locationIds
+
+      .map(
+        (id) =>
+          labels.get(id)
+      )
+
+      .filter(
+        (
+          value
+        ): value is string =>
+          Boolean(value)
+      )
+
+
+  const country =
+
+    countryIds.length >
+    0
+
+      ? labels.get(
+          countryIds[0]
+        )
+        ??
+        null
+
+      : null
 
 
   let source:
-    ElevationSource =
-      'open-meteo-geocoding'
+    PeakFacts['source'] =
+    'wikidata'
 
 
-  // ===================================================
-  // DACĂ NU AVEM ELEVAȚIE
-  // ===================================================
+  /*
+    Dacă Wikidata știe poziția,
+    dar nu are altitudine,
+    folosim DEM ca fallback.
+  */
 
   if (
     elevation ===
     null
+    &&
+    coordinates
   ) {
 
     elevation =
       await getOpenMeteoElevation(
-        latitude,
-        longitude
+
+        coordinates.latitude,
+
+        coordinates.longitude
+
       )
 
 
@@ -1380,7 +2802,7 @@ async function findPeakWithOpenMeteo(
     ) {
 
       source =
-        'open-meteo-dem'
+        'wikidata+dem'
 
     }
 
@@ -1388,233 +2810,36 @@ async function findPeakWithOpenMeteo(
 
 
   return {
+
+    qid:
+      entity.id,
+
     name:
-      best.item.name
-      ||
-      requestedName,
+      humanizePeakName(
+        name
+      ),
 
     elevation,
 
-    latitude,
+    latitude:
+      coordinates
+        ?.latitude
+      ??
+      null,
 
-    longitude,
+    longitude:
+      coordinates
+        ?.longitude
+      ??
+      null,
+
+    mountainRanges,
+
+    locations,
+
+    country,
 
     source
-  }
-
-}
-
-
-// =====================================================
-// NOMINATIM - CĂUTARE DUPĂ NUME
-// =====================================================
-
-async function findPeakWithNominatim(
-  requestedName: string
-): Promise<PeakLookupResult | null> {
-
-  try {
-
-    const cleanName =
-      normalizePeakName(
-        requestedName
-      )
-
-
-    const params =
-      new URLSearchParams({
-        q:
-          `Vârful ${cleanName}, România`,
-
-        format:
-          'jsonv2',
-
-        limit:
-          '10',
-
-        addressdetails:
-          '1',
-
-        extratags:
-          '1',
-
-        namedetails:
-          '1',
-
-        countrycodes:
-          'ro',
-
-        'accept-language':
-          'ro'
-      })
-
-
-    const response =
-      await fetchWithTimeout(
-        `${NOMINATIM_SEARCH_URL}?${params.toString()}`
-      )
-
-
-    if (
-      !response.ok
-    ) {
-
-      return null
-
-    }
-
-
-    const results:
-      NominatimResult[] =
-      await response.json()
-
-
-    if (
-      !Array.isArray(
-        results
-      )
-      ||
-      results.length ===
-      0
-    ) {
-
-      return null
-
-    }
-
-
-    const ranked =
-      results
-
-        .map(
-          (item) => {
-
-            const candidateName =
-              item.name
-              ||
-              item.namedetails?.name
-              ||
-              item.display_name
-                ?.split(',')[0]
-              ||
-              cleanName
-
-
-            let score =
-              getNameMatchScore(
-                candidateName,
-                cleanName
-              )
-
-
-            if (
-              item.type ===
-              'peak'
-            ) {
-
-              score -=
-                50
-
-            }
-
-
-            if (
-              item.category ===
-              'natural'
-            ) {
-
-              score -=
-                20
-
-            }
-
-
-            return {
-              item,
-              candidateName,
-              score
-            }
-
-          }
-        )
-
-        .sort(
-          (a, b) =>
-            a.score -
-            b.score
-        )
-
-
-    const best =
-      ranked[0]
-
-
-    if (!best) {
-
-      return null
-
-    }
-
-
-    const latitude =
-      Number.parseFloat(
-        best.item.lat ??
-        ''
-      )
-
-
-    const longitude =
-      Number.parseFloat(
-        best.item.lon ??
-        ''
-      )
-
-
-    if (
-      !Number.isFinite(
-        latitude
-      )
-      ||
-      !Number.isFinite(
-        longitude
-      )
-    ) {
-
-      return null
-
-    }
-
-
-    return {
-      name:
-        best.candidateName,
-
-      elevation:
-        parseElevation(
-          best.item
-            .extratags
-            ?.ele
-        ),
-
-      latitude,
-
-      longitude,
-
-      source:
-        'nominatim'
-    }
-
-  }
-
-  catch (error) {
-
-    console.log(
-      'Nominatim search error:',
-      error
-    )
-
-
-    return null
 
   }
 
@@ -1622,222 +2847,170 @@ async function findPeakWithNominatim(
 
 
 // =====================================================
-// OVERPASS - CĂUTARE ÎN JURUL COORDONATELOR
+// OSM - NUME VÂRF
 // =====================================================
 
-async function findPeakNearCoordinates(
-  latitude: number,
-  longitude: number,
-  requestedName: string,
-  radius =
-    PEAK_NAME_COORDINATE_RADIUS
-): Promise<PeakLookupResult | null> {
+function getOsmPeakName(
+  peak: OsmPeak
+) {
 
-  try {
+  return (
 
-    const query = `
-      [out:json][timeout:15];
+    peak.tags
+      ?.['name:ro']
 
-      node(
-        around:${radius},
-        ${latitude},
-        ${longitude}
-      )
-      ["natural"="peak"];
+    ||
 
-      out body;
-    `
+    peak.tags
+      ?.name
 
+    ||
 
-    const peaks =
-      await runOverpassQuery(
-        query
-      )
+    peak.tags
+      ?.alt_name
+
+    ||
+
+    'Vârf fără nume'
+
+  )
+
+}
 
 
-    if (
-      peaks.length ===
-      0
-    ) {
+// =====================================================
+// ESCAPE REGEX
+// =====================================================
 
-      return null
+function escapeRegex(
+  text: string
+) {
 
-    }
+  return text.replace(
 
+    /[.*+?^${}()|[\]\\]/g,
 
-    const ranked =
-      peaks
+    '\\$&'
 
-        .map(
-          (peak) => {
+  )
 
-            const name =
-              getPeakName(
-                peak
-              )
+}
 
 
-            const distance =
-              calculateDistance(
-                latitude,
-                longitude,
-                peak.lat,
-                peak.lon
-              )
+// =====================================================
+// OVERPASS CU FALLBACK
+// =====================================================
+
+async function runOverpassQuery(
+  query: string
+): Promise<OsmPeak[]> {
+
+  let lastError:
+    unknown =
+    null
 
 
-            const nameScore =
-              getNameMatchScore(
-                name,
-                requestedName
-              )
+  for (
+    const url
+    of OVERPASS_URLS
+  ) {
 
+    try {
 
-            return {
-              peak,
-              name,
-              distance,
-              nameScore,
+      const response =
+        await fetchWithTimeout(
 
-              score:
-                (
-                  nameScore *
-                  100000
-                )
-                +
-                distance
-            }
+          url,
+
+          {
+
+            method:
+              'POST',
+
+            headers: {
+
+              'Content-Type':
+                'application/x-www-form-urlencoded'
+
+            },
+
+            body:
+              new URLSearchParams({
+
+                data:
+                  query
+
+              })
 
           }
-        )
 
-        .sort(
-          (a, b) =>
-            a.score -
-            b.score
-        )
-
-
-    if (
-      ranked.length ===
-      0
-    ) {
-
-      return null
-
-    }
-
-
-    const matching =
-      ranked.find(
-        (candidate) =>
-          candidate.nameScore <=
-          10
-      )
-
-
-    const best =
-      matching
-      ??
-      ranked[0]
-
-
-    if (
-      best.nameScore >=
-      100
-      &&
-      best.distance >
-      800
-    ) {
-
-      return null
-
-    }
-
-
-    let elevation =
-      parseElevation(
-        best.peak
-          .tags
-          ?.ele
-      )
-
-
-    let source:
-      ElevationSource =
-        'osm'
-
-
-    /*
-      Dacă OSM găsește vârful,
-      dar ele lipsește,
-      folosim DEM-ul Open-Meteo.
-    */
-
-    if (
-      elevation ===
-      null
-    ) {
-
-      elevation =
-        await getOpenMeteoElevation(
-          best.peak.lat,
-          best.peak.lon
         )
 
 
       if (
-        elevation !==
-        null
+        !response.ok
       ) {
 
-        source =
-          'open-meteo-dem'
+        throw new Error(
+          `Overpass HTTP ${response.status}`
+        )
 
       }
 
+
+      const data =
+        await response.json()
+
+
+      return (
+        data.elements
+        ??
+        []
+      )
+
     }
 
+    catch (error) {
 
-    return {
-      name:
-        best.name,
+      lastError =
+        error
 
-      elevation,
 
-      latitude:
-        best.peak.lat,
+      console.log(
 
-      longitude:
-        best.peak.lon,
+        `Overpass indisponibil: ${url}`,
 
-      source
+        error
+
+      )
+
     }
 
   }
 
-  catch (error) {
 
-    console.log(
-      'Peak near coordinates error:',
-      error
+  throw (
+
+    lastError
+
+    ??
+
+    new Error(
+      'Overpass indisponibil.'
     )
 
-
-    return null
-
-  }
+  )
 
 }
 
 
 // =====================================================
-// OVERPASS - CĂUTARE DIRECTĂ DUPĂ NUME
+// OVERPASS - CĂUTARE EXACTĂ
 // =====================================================
 
-async function findPeakByNameOverpass(
+async function findPeakWithOverpassExact(
   requestedName: string
-): Promise<PeakLookupResult | null> {
+): Promise<PeakFacts | null> {
 
   try {
 
@@ -1854,9 +3027,11 @@ async function findPeakByNameOverpass(
 
 
     const query = `
+
       [out:json][timeout:15];
 
       (
+
         node
           ["natural"="peak"]
           ["name"~"${safeName}",i]
@@ -1867,13 +3042,10 @@ async function findPeakByNameOverpass(
           ["name:ro"~"${safeName}",i]
           (43.5,20.0,48.5,30.0);
 
-        node
-          ["natural"="peak"]
-          ["alt_name"~"${safeName}",i]
-          (43.5,20.0,48.5,30.0);
       );
 
       out body;
+
     `
 
 
@@ -1898,20 +3070,25 @@ async function findPeakByNameOverpass(
 
         .map(
           (peak) => ({
+
             peak,
 
             name:
-              getPeakName(
+              getOsmPeakName(
                 peak
               ),
 
             score:
               getNameMatchScore(
-                getPeakName(
+
+                getOsmPeakName(
                   peak
                 ),
+
                 cleanName
+
               )
+
           })
         )
 
@@ -1926,7 +3103,22 @@ async function findPeakByNameOverpass(
       ranked[0]
 
 
-    if (!best) {
+    /*
+      FOARTE IMPORTANT:
+
+      Dacă cerem Negoiu,
+      Negoiu Mic are scor 2.
+
+      Acceptăm aici doar
+      potrivirea exactă = 0.
+    */
+
+    if (
+      !best
+      ||
+      best.score >
+      0
+    ) {
 
       return null
 
@@ -1935,15 +3127,13 @@ async function findPeakByNameOverpass(
 
     let elevation =
       parseElevation(
-        best.peak
-          .tags
-          ?.ele
+        best.peak.tags?.ele
       )
 
 
     let source:
-      ElevationSource =
-        'osm'
+      PeakFacts['source'] =
+      'osm'
 
 
     if (
@@ -1953,8 +3143,11 @@ async function findPeakByNameOverpass(
 
       elevation =
         await getOpenMeteoElevation(
+
           best.peak.lat,
+
           best.peak.lon
+
         )
 
 
@@ -1964,16 +3157,39 @@ async function findPeakByNameOverpass(
       ) {
 
         source =
-          'open-meteo-dem'
+          'osm+dem'
 
       }
 
     }
 
 
+    const range =
+
+      best.peak.tags
+        ?.['is_in:mountains']
+
+      ||
+
+      best.peak.tags
+        ?.['is_in:mountain_range']
+
+      ||
+
+      best.peak.tags
+        ?.mountain_range
+
+      ||
+
+      null
+
+
     return {
+
       name:
-        best.name,
+        humanizePeakName(
+          best.name
+        ),
 
       elevation,
 
@@ -1983,7 +3199,26 @@ async function findPeakByNameOverpass(
       longitude:
         best.peak.lon,
 
+      mountainRanges:
+
+        range
+
+          ? [
+              humanizeRangeName(
+                range
+              )
+            ]
+
+          : [],
+
+      locations:
+        [],
+
+      country:
+        'România',
+
       source
+
     }
 
   }
@@ -1991,7 +3226,7 @@ async function findPeakByNameOverpass(
   catch (error) {
 
     console.log(
-      'Overpass name search error:',
+      'Overpass exact peak:',
       error
     )
 
@@ -2004,12 +3239,19 @@ async function findPeakByNameOverpass(
 
 
 // =====================================================
-// CĂUTARE COMPLETĂ VÂRF DUPĂ NUME
+// CĂUTARE COMPLETĂ VÂRF
 // =====================================================
 
-async function findPeakByName(
-  requestedName: string
-): Promise<PeakLookupResult | null> {
+async function findPeakFacts(
+
+  requestedName:
+    string,
+
+  rangeHint:
+    string | null =
+      null
+
+): Promise<PeakFacts | null> {
 
   const cleanName =
     normalizePeakName(
@@ -2017,20 +3259,23 @@ async function findPeakByName(
     )
 
 
-  if (!cleanName) {
+  const cleanRange =
+    rangeHint
 
-    return null
+      ? normalizeRangeName(
+          rangeHint
+        )
 
-  }
+      : ''
 
 
-  // ===================================================
-  // CACHE
-  // ===================================================
+  const cacheKey =
+    `${cleanName}|${cleanRange}`
+
 
   const cached =
-    peakLookupCache.get(
-      cleanName
+    peakFactsCache.get(
+      cacheKey
     )
 
 
@@ -2042,165 +3287,75 @@ async function findPeakByName(
 
 
   // ===================================================
-  // 1. OPEN-METEO
+  // 1. WIKIDATA
   // ===================================================
 
-  const openMeteo =
-    await findPeakWithOpenMeteo(
-      cleanName
-    )
+  try {
 
+    const entity =
+      await findWikidataPeakEntity(
 
-  if (
-    openMeteo &&
-    openMeteo.elevation !==
-    null
-  ) {
+        cleanName,
 
-    peakLookupCache.set(
-      cleanName,
-      openMeteo
-    )
+        cleanRange ||
+        null
 
-
-    return openMeteo
-
-  }
-
-
-  // ===================================================
-  // 2. DACĂ OPEN-METEO A GĂSIT COORDONATELE,
-  //    VERIFICĂM ȘI OSM ÎN JUR
-  // ===================================================
-
-  if (
-    openMeteo
-  ) {
-
-    const around =
-      await findPeakNearCoordinates(
-        openMeteo.latitude,
-        openMeteo.longitude,
-        cleanName
       )
 
 
     if (
-      around &&
-      around.elevation !==
-      null
+      entity
     ) {
 
-      peakLookupCache.set(
-        cleanName,
-        around
+      const facts =
+        await buildPeakFactsFromWikidata(
+          entity
+        )
+
+
+      peakFactsCache.set(
+        cacheKey,
+        facts
       )
 
 
-      return around
+      return facts
 
     }
 
   }
 
+  catch (error) {
 
-  // ===================================================
-  // 3. NOMINATIM
-  // ===================================================
-
-  const nominatim =
-    await findPeakWithNominatim(
-      cleanName
+    console.log(
+      'Wikidata peak search:',
+      error
     )
-
-
-  if (
-    nominatim
-  ) {
-
-    if (
-      nominatim.elevation !==
-      null
-    ) {
-
-      peakLookupCache.set(
-        cleanName,
-        nominatim
-      )
-
-
-      return nominatim
-
-    }
-
-
-    const around =
-      await findPeakNearCoordinates(
-        nominatim.latitude,
-        nominatim.longitude,
-        cleanName
-      )
-
-
-    if (
-      around &&
-      around.elevation !==
-      null
-    ) {
-
-      peakLookupCache.set(
-        cleanName,
-        around
-      )
-
-
-      return around
-
-    }
 
   }
 
 
   // ===================================================
-  // 4. OVERPASS DUPĂ NUME
+  // 2. OSM EXACT
   // ===================================================
 
-  const overpass =
-    await findPeakByNameOverpass(
+  const osm =
+    await findPeakWithOverpassExact(
       cleanName
     )
 
 
   if (
-    overpass
+    osm
   ) {
 
-    peakLookupCache.set(
-      cleanName,
-      overpass
+    peakFactsCache.set(
+      cacheKey,
+      osm
     )
 
 
-    return overpass
-
-  }
-
-
-  // ===================================================
-  // 5. DACĂ OPEN-METEO A GĂSIT MĂCAR LOCAȚIA
-  // ===================================================
-
-  if (
-    openMeteo
-  ) {
-
-    peakLookupCache.set(
-      cleanName,
-      openMeteo
-    )
-
-
-    return openMeteo
+    return osm
 
   }
 
@@ -2211,7 +3366,400 @@ async function findPeakByName(
 
 
 // =====================================================
-// CĂUTARE VÂRFURI ÎN JURUL VIZITELOR
+// WIKIDATA - GĂSIM MASIVUL
+// =====================================================
+
+async function findMountainRangeEntity(
+  requestedRange: string
+): Promise<MountainRangeEntity | null> {
+
+  const cleanRange =
+    normalizeRangeName(
+      requestedRange
+    )
+
+
+  if (
+    !cleanRange
+  ) {
+
+    return null
+
+  }
+
+
+  const cached =
+    mountainRangeCache.get(
+      cleanRange
+    )
+
+
+  if (cached) {
+
+    return cached
+
+  }
+
+
+  const variants = [
+
+    cleanRange,
+
+    `Munții ${cleanRange}`,
+
+    `${cleanRange} Mountains`,
+
+    `Masivul ${cleanRange}`
+
+  ]
+
+
+  const searchResults:
+    WikidataSearchResult[] =
+    []
+
+
+  for (
+    const variant
+    of variants
+  ) {
+
+    const [
+      romanian,
+      english
+    ] =
+      await Promise.all([
+
+        wikidataSearch(
+          variant,
+          'ro'
+        ),
+
+        wikidataSearch(
+          variant,
+          'en'
+        )
+
+      ])
+
+
+    searchResults.push(
+      ...romanian,
+      ...english
+    )
+
+  }
+
+
+  const ids =
+    Array.from(
+
+      new Set(
+
+        searchResults
+          .map(
+            (item) =>
+              item.id
+          )
+
+      )
+
+    )
+      .slice(
+        0,
+        25
+      )
+
+
+  if (
+    ids.length ===
+    0
+  ) {
+
+    return null
+
+  }
+
+
+  const entities =
+    await getWikidataEntities(
+      ids
+    )
+
+
+  const relatedIds =
+    entities.flatMap(
+
+      (entity) =>
+        getItemClaimIds(
+          entity,
+          'P31'
+        )
+
+    )
+
+
+  const labels =
+    await resolveWikidataLabels(
+      relatedIds
+    )
+
+
+  const ranked =
+    entities
+
+      .map(
+        (entity) => {
+
+          const names =
+            getEntityNames(
+              entity
+            )
+
+
+          const nameScore =
+            Math.min(
+
+              ...names.map(
+                (name) => {
+
+                  const candidate =
+                    normalizeRangeName(
+                      name
+                    )
+
+
+                  if (
+                    candidate ===
+                    cleanRange
+                  ) {
+
+                    return 0
+
+                  }
+
+
+                  if (
+                    candidate.includes(
+                      cleanRange
+                    )
+                    ||
+                    cleanRange.includes(
+                      candidate
+                    )
+                  ) {
+
+                    return 2
+
+                  }
+
+
+                  return 20
+
+                }
+              ),
+
+              100
+
+            )
+
+
+          const description =
+            [
+
+              entity.descriptions
+                ?.ro
+                ?.value
+              ??
+              '',
+
+              entity.descriptions
+                ?.en
+                ?.value
+              ??
+              '',
+
+              ...getItemClaimIds(
+                entity,
+                'P31'
+              )
+                .map(
+                  (id) =>
+                    labels.get(id)
+                    ??
+                    ''
+                )
+
+            ]
+              .join(' ')
+
+
+          const normalizedDescription =
+            plainNormalize(
+              description
+            )
+
+
+          const rangeLike =
+
+            normalizedDescription
+              .includes(
+                'mountain range'
+              )
+
+            ||
+
+            normalizedDescription
+              .includes(
+                'mountains'
+              )
+
+            ||
+
+            normalizedDescription
+              .includes(
+                'masiv'
+              )
+
+            ||
+
+            normalizedDescription
+              .includes(
+                'munti'
+              )
+
+
+          let score =
+            nameScore *
+            100
+
+
+          if (
+            rangeLike
+          ) {
+
+            score -=
+              600
+
+          }
+
+
+          return {
+
+            entity,
+
+            score
+
+          }
+
+        }
+      )
+
+      .sort(
+        (a, b) =>
+          a.score -
+          b.score
+      )
+
+
+  const best =
+    ranked[0]
+
+
+  if (!best) {
+
+    return null
+
+  }
+
+
+  const result = {
+
+    qid:
+      best.entity.id,
+
+    name:
+      humanizeRangeName(
+
+        getPreferredEntityLabel(
+          best.entity
+        )
+
+      ),
+
+    entity:
+      best.entity
+
+  }
+
+
+  mountainRangeCache.set(
+    cleanRange,
+    result
+  )
+
+
+  return result
+
+}
+
+
+// =====================================================
+// CEL MAI ÎNALT PUNCT
+// =====================================================
+
+async function getHighestPointFromEntity(
+  entity: WikidataEntity
+): Promise<PeakFacts | null> {
+
+  /*
+    P610 = highest point
+  */
+
+  const highestIds =
+    getItemClaimIds(
+      entity,
+      'P610'
+    )
+
+
+  if (
+    highestIds.length ===
+    0
+  ) {
+
+    return null
+
+  }
+
+
+  const peakEntities =
+    await getWikidataEntities([
+      highestIds[0]
+    ])
+
+
+  const peak =
+    peakEntities[0]
+
+
+  if (!peak) {
+
+    return null
+
+  }
+
+
+  return await
+    buildPeakFactsFromWikidata(
+      peak
+    )
+
+}
+
+
+// =====================================================
+// VÂRFURI APROPIATE DE VIZITE
 // =====================================================
 
 async function getPeaksNearVisits(
@@ -2235,13 +3783,17 @@ async function getPeaksNearVisits(
 
 
         return (
+
           Number.isFinite(
             latitude
           )
+
           &&
+
           Number.isFinite(
             longitude
           )
+
         )
 
       }
@@ -2258,7 +3810,7 @@ async function getPeaksNearVisits(
   }
 
 
-  const CHUNK_SIZE =
+  const chunkSize =
     10
 
 
@@ -2267,34 +3819,49 @@ async function getPeaksNearVisits(
 
 
   for (
+
     let index = 0;
-    index < validVisits.length;
-    index += CHUNK_SIZE
+
+    index <
+    validVisits.length;
+
+    index +=
+    chunkSize
+
   ) {
 
     const chunk =
       validVisits.slice(
+
         index,
-        index + CHUNK_SIZE
+
+        index +
+        chunkSize
+
       )
 
 
     const aroundQueries =
       chunk
+
         .map(
           (visit) => `
+
             node(
               around:${VISIT_PEAK_SEARCH_RADIUS},
               ${Number(visit.latitude)},
               ${Number(visit.longitude)}
             )
             ["natural"="peak"];
+
           `
         )
+
         .join('\n')
 
 
     const query = `
+
       [out:json][timeout:15];
 
       (
@@ -2302,6 +3869,7 @@ async function getPeaksNearVisits(
       );
 
       out body;
+
     `
 
 
@@ -2322,7 +3890,7 @@ async function getPeaksNearVisits(
     catch (error) {
 
       console.log(
-        'Eroare analiză vizite:',
+        'Analiză vizite Overpass:',
         error
       )
 
@@ -2377,7 +3945,8 @@ async function identifyVisitedPeaks(
 
 
   let nearbyPeaks:
-    OsmPeak[] = []
+    OsmPeak[] =
+    []
 
 
   try {
@@ -2437,9 +4006,17 @@ async function identifyVisitedPeaks(
 
     const visitText =
       normalizeText(
-        `${visit.place_name ?? ''} ` +
-        `${visit.location_details ?? ''} ` +
+
+        `${visit.place_name ?? ''} `
+
+        +
+
+        `${visit.location_details ?? ''} `
+
+        +
+
         `${visit.description ?? ''}`
+
       )
 
 
@@ -2473,6 +4050,7 @@ async function identifyVisitedPeaks(
 
 
       results.push({
+
         visitId:
           visit.id,
 
@@ -2493,7 +4071,13 @@ async function identifyVisitedPeaks(
           visitLatitude,
 
         longitude:
-          visitLongitude
+          visitLongitude,
+
+        mountainRange:
+          visit.mountain_range
+          ??
+          null
+
       })
 
 
@@ -2503,16 +4087,114 @@ async function identifyVisitedPeaks(
 
 
     // =================================================
-    // 2. CĂUTĂM VÂRF APROPIAT
+    // 2. DACĂ NUMELE APARE ÎN LOCAȚIE,
+    //    FOLOSIM NUMELE.
     // =================================================
 
-    let bestPeak:
+    const extractedPeakName =
+      extractPeakNameFromVisit(
+        visit
+      )
+
+
+    if (
+      extractedPeakName
+    ) {
+
+      const external =
+        await findPeakFacts(
+          extractedPeakName
+        )
+
+
+      if (
+        external
+        &&
+        external.elevation !==
+        null
+        &&
+        external.latitude !==
+        null
+        &&
+        external.longitude !==
+        null
+      ) {
+
+        const distance =
+          calculateDistance(
+
+            visitLatitude,
+
+            visitLongitude,
+
+            external.latitude,
+
+            external.longitude
+
+          )
+
+
+        if (
+          distance <=
+          NAMED_PEAK_MAX_DISTANCE
+        ) {
+
+          results.push({
+
+            visitId:
+              visit.id,
+
+            name:
+              external.name,
+
+            elevation:
+              external.elevation,
+
+            distance,
+
+            latitude:
+              external.latitude,
+
+            longitude:
+              external.longitude,
+
+            mountainRange:
+
+              external
+                .mountainRanges[0]
+
+              ??
+
+              visit.mountain_range
+
+              ??
+
+              null
+
+          })
+
+
+          continue
+
+        }
+
+      }
+
+    }
+
+
+    // =================================================
+    // 3. FALLBACK CEL MAI APROPIAT OSM
+    // =================================================
+
+    let best:
       IdentifiedPeak | null =
       null
 
 
     let bestScore =
-      Number.POSITIVE_INFINITY
+      Number
+        .POSITIVE_INFINITY
 
 
     for (
@@ -2520,18 +4202,17 @@ async function identifyVisitedPeaks(
       of nearbyPeaks
     ) {
 
-      let elevation =
-        parseElevation(
-          peak.tags?.ele
-        )
-
-
       const distance =
         calculateDistance(
+
           visitLatitude,
+
           visitLongitude,
+
           peak.lat,
+
           peak.lon
+
         )
 
 
@@ -2546,7 +4227,7 @@ async function identifyVisitedPeaks(
 
 
       const peakName =
-        getPeakName(
+        getOsmPeakName(
           peak
         )
 
@@ -2557,17 +4238,15 @@ async function identifyVisitedPeaks(
         )
 
 
-      const visitPeakText =
-        normalizePeakName(
-          visitText
-        )
-
-
       const nameMatches =
-        normalizedPeakName.length >=
+
+        normalizedPeakName
+          .length >=
         2
+
         &&
-        visitPeakText.includes(
+
+        visitText.includes(
           normalizedPeakName
         )
 
@@ -2584,11 +4263,11 @@ async function identifyVisitedPeaks(
       }
 
 
-      /*
-        Dacă OSM nu are ele,
-        putem cere DEM doar pentru
-        un candidat relevant.
-      */
+      let elevation =
+        parseElevation(
+          peak.tags?.ele
+        )
+
 
       if (
         elevation ===
@@ -2597,8 +4276,11 @@ async function identifyVisitedPeaks(
 
         elevation =
           await getOpenMeteoElevation(
+
             peak.lat,
+
             peak.lon
+
           )
 
       }
@@ -2615,8 +4297,12 @@ async function identifyVisitedPeaks(
 
 
       const score =
+
         nameMatches
-          ? distance - 10000
+
+          ? distance -
+            10000
+
           : distance
 
 
@@ -2629,12 +4315,15 @@ async function identifyVisitedPeaks(
           score
 
 
-        bestPeak = {
+        best = {
+
           visitId:
             visit.id,
 
           name:
-            peakName,
+            humanizePeakName(
+              peakName
+            ),
 
           elevation,
 
@@ -2644,7 +4333,27 @@ async function identifyVisitedPeaks(
             peak.lat,
 
           longitude:
-            peak.lon
+            peak.lon,
+
+          mountainRange:
+
+            peak.tags
+              ?.['is_in:mountains']
+
+            ||
+
+            peak.tags
+              ?.['is_in:mountain_range']
+
+            ||
+
+            peak.tags
+              ?.mountain_range
+
+            ||
+
+            null
+
         }
 
       }
@@ -2652,95 +4361,11 @@ async function identifyVisitedPeaks(
     }
 
 
-    if (
-      bestPeak
-    ) {
+    if (best) {
 
       results.push(
-        bestPeak
+        best
       )
-
-
-      continue
-
-    }
-
-
-    // =================================================
-    // 3. NUMELE VÂRFULUI APARE ÎN LOCAȚIE
-    // =================================================
-
-    const extractedPeakName =
-      extractPeakNameFromVisit(
-        visit
-      )
-
-
-    if (
-      extractedPeakName
-    ) {
-
-      try {
-
-        const externalPeak =
-          await findPeakByName(
-            extractedPeakName
-          )
-
-
-        if (
-          externalPeak &&
-          externalPeak.elevation !==
-          null
-        ) {
-
-          const distance =
-            calculateDistance(
-              visitLatitude,
-              visitLongitude,
-              externalPeak.latitude,
-              externalPeak.longitude
-            )
-
-
-          if (
-            distance <=
-            NAMED_PEAK_MAX_DISTANCE
-          ) {
-
-            results.push({
-              visitId:
-                visit.id,
-
-              name:
-                externalPeak.name,
-
-              elevation:
-                externalPeak.elevation,
-
-              distance,
-
-              latitude:
-                externalPeak.latitude,
-
-              longitude:
-                externalPeak.longitude
-            })
-
-          }
-
-        }
-
-      }
-
-      catch (error) {
-
-        console.log(
-          `Nu am putut verifica ${extractedPeakName}:`,
-          error
-        )
-
-      }
 
     }
 
@@ -2816,6 +4441,7 @@ function ChatBot({
   visits
 }: ChatBotProps) {
 
+
   // ===================================================
   // STATE
   // ===================================================
@@ -2852,7 +4478,9 @@ function ChatBot({
     setMessages
   ] =
     useState<ChatMessage[]>([
+
       {
+
         id:
           1,
 
@@ -2867,13 +4495,38 @@ Pot căuta informații despre vârfuri și pot analiza locurile tale vizitate.
 Poți întreba:
 
 • Ce altitudine are Vârful Negoiu?
-• Ce altitudine are Moldoveanu?
-• Care este cel mai înalt vârf pe care l-am vizitat?
-• Ce vârfuri am vizitat?
-• Câte vârfuri am vizitat?
-• Am fost pe Vârful Omu?`
+• În ce masiv se află Vârful Omu?
+• Ce altitudine are Vârful Greci din Munții Măcin?
+• Unde se află Moldoveanu?
+• Ce coordonate are Vârful Omu?
+• Care este cel mai înalt vârf din Munții Bucegi?
+• Care este cel mai înalt vârf din România?
+• Ce vârfuri din Făgăraș am vizitat?
+• Care este cel mai înalt vârf pe care l-am vizitat?`
+
       }
+
     ])
+
+
+  // ===================================================
+  // MEMORIA CONVERSAȚIEI
+  // ===================================================
+
+  const lastPeakNameRef =
+    useRef<
+      string | null
+    >(
+      null
+    )
+
+
+  const lastIntentRef =
+    useRef<
+      ConversationIntent
+    >(
+      null
+    )
 
 
   // ===================================================
@@ -2897,13 +4550,15 @@ Poți întreba:
 
 
   const messagesEndRef =
-    useRef<HTMLDivElement | null>(
+    useRef<
+      HTMLDivElement | null
+    >(
       null
     )
 
 
   // ===================================================
-  // RESET CACHE CÂND SE SCHIMBĂ VIZITELE
+  // RESET CACHE LA MODIFICAREA VIZITELOR
   // ===================================================
 
   useEffect(() => {
@@ -2915,7 +4570,9 @@ Poți întreba:
     visitedPeaksPromiseRef.current =
       null
 
-  }, [visits])
+  }, [
+    visits
+  ])
 
 
   // ===================================================
@@ -2931,10 +4588,13 @@ Poți întreba:
     }
 
 
-    messagesEndRef.current
+    messagesEndRef
+      .current
       ?.scrollIntoView({
+
         behavior:
           'smooth'
+
       })
 
   }, [
@@ -2945,7 +4605,7 @@ Poți întreba:
 
 
   // ===================================================
-  // ANALIZĂ VÂRFURI CU CACHE
+  // VÂRFURI VIZITATE CU CACHE
   // ===================================================
 
   async function getVisitedPeaksCached() {
@@ -3013,20 +4673,100 @@ Poți întreba:
 
 
   // ===================================================
-  // ALTITUDINE VÂRF EXTERN
+  // REZOLVĂ NUMELE VÂRFULUI
   // ===================================================
 
-  async function answerPeakElevation(
-    question: string
+  function resolvePeakName(
+
+    question:
+      string,
+
+    forcedName?:
+      string
+
   ) {
 
-    const peakName =
+    const explicit =
+      forcedName
+      ||
       extractPeakName(
         question
       )
 
 
-    if (!peakName) {
+    if (
+      explicit
+    ) {
+
+      return explicit
+
+    }
+
+
+    /*
+      Pentru follow-up:
+
+      "Și în ce masiv este?"
+    */
+
+    return (
+      lastPeakNameRef.current
+    )
+
+  }
+
+
+  // ===================================================
+  // MEMORĂM VÂRFUL
+  // ===================================================
+
+  function rememberPeak(
+
+    requestedName:
+      string,
+
+    intent:
+      ConversationIntent
+
+  ) {
+
+    lastPeakNameRef.current =
+      requestedName
+
+
+    lastIntentRef.current =
+      intent
+
+  }
+
+
+  // ===================================================
+  // ALTITUDINE VÂRF
+  // ===================================================
+
+  async function answerPeakElevation(
+
+    question:
+      string,
+
+    forcedName?:
+      string
+
+  ) {
+
+    const peakName =
+      resolvePeakName(
+
+        question,
+
+        forcedName
+
+      )
+
+
+    if (
+      !peakName
+    ) {
 
       return (
         'Spune-mi numele vârfului. De exemplu: „Ce altitudine are Vârful Negoiu?”'
@@ -3035,22 +4775,37 @@ Poți întreba:
     }
 
 
-    const peak =
-      await findPeakByName(
-        peakName
+    const rangeHint =
+      extractRangeHint(
+        question
       )
 
 
-    if (!peak) {
+    const peak =
+      await findPeakFacts(
+
+        peakName,
+
+        rangeHint
+
+      )
+
+
+    if (
+      !peak
+    ) {
 
       return (
-`❌ Nu am reușit să găsesc „${peakName}” în sursele externe.
-
-Încearcă și forma simplă, de exemplu:
-„Ce altitudine are Negoiu?”`
+        `❌ Nu am reușit să identific sigur vârful „${peakName}”.`
       )
 
     }
+
+
+    rememberPeak(
+      peakName,
+      'elevation'
+    )
 
 
     if (
@@ -3059,99 +4814,498 @@ Poți întreba:
     ) {
 
       return (
-`🏔️ Am găsit ${peak.name}, dar nu am reușit să determin altitudinea.`
+        `🏔️ Am găsit ${peak.name}, dar nu am găsit o altitudine sigură.`
       )
 
     }
 
 
-    if (
-      peak.source ===
-      'open-meteo-dem'
-    ) {
+    const approximate =
 
-      return (
-`🏔️ ${peak.name}
+      peak.source
+        .includes(
+          'dem'
+        )
 
-Altitudine aproximativă: ${peak.elevation} m`
-      )
+        ? ' aproximativ'
 
-    }
+        : ''
+
+
+    const rangeText =
+
+      peak.mountainRanges
+        .length >
+      0
+
+        ? `\nMasiv: ${peak.mountainRanges.join(', ')}`
+
+        : ''
 
 
     return (
+
 `🏔️ ${peak.name}
 
-Altitudine: ${peak.elevation} m`
+Altitudine${approximate}: ${peak.elevation} m${rangeText}`
+
     )
 
   }
 
 
   // ===================================================
-  // CEL MAI ÎNALT VÂRF VIZITAT
+  // ÎN CE MASIV ESTE?
   // ===================================================
 
-  async function answerHighestVisitedPeak() {
+  async function answerPeakRange(
+
+    question:
+      string,
+
+    forcedName?:
+      string
+
+  ) {
+
+    const peakName =
+      resolvePeakName(
+
+        question,
+
+        forcedName
+
+      )
+
 
     if (
-      visits.length ===
-      0
+      !peakName
     ) {
 
       return (
-        'Nu ai încă nicio locație salvată în PeakQuest.'
+        'Spune-mi numele vârfului. De exemplu: „În ce masiv se află Vârful Omu?”'
       )
 
     }
 
 
-    const identified =
-      await getVisitedPeaksCached()
+    const peak =
+      await findPeakFacts(
+        peakName
+      )
 
 
     if (
-      identified.length ===
-      0
+      !peak
     ) {
 
       return (
-`Nu am reușit momentan să identific un vârf cu altitudine dintre locațiile tale.
-
-Încearcă din nou peste câteva secunde.`
+        `❌ Nu am reușit să identific sigur vârful „${peakName}”.`
       )
 
     }
 
 
-    const uniquePeaks =
-      getUniquePeaks(
-        identified
+    rememberPeak(
+      peakName,
+      'range'
+    )
+
+
+    if (
+      peak.mountainRanges
+        .length ===
+      0
+    ) {
+
+      return (
+        `🏔️ Am găsit ${peak.name}, dar sursa nu indică masivul montan.`
       )
+
+    }
+
+
+    return (
+
+`🏔️ ${peak.name} se află în:
+
+${peak.mountainRanges.join(', ')}`
+
+    )
+
+  }
+
+
+  // ===================================================
+  // COORDONATE
+  // ===================================================
+
+  async function answerPeakCoordinates(
+
+    question:
+      string,
+
+    forcedName?:
+      string
+
+  ) {
+
+    const peakName =
+      resolvePeakName(
+
+        question,
+
+        forcedName
+
+      )
+
+
+    if (
+      !peakName
+    ) {
+
+      return (
+        'Spune-mi numele vârfului.'
+      )
+
+    }
+
+
+    const peak =
+      await findPeakFacts(
+        peakName
+      )
+
+
+    if (
+      !peak
+    ) {
+
+      return (
+        `❌ Nu am reușit să identific sigur vârful „${peakName}”.`
+      )
+
+    }
+
+
+    rememberPeak(
+      peakName,
+      'coordinates'
+    )
+
+
+    if (
+      peak.latitude ===
+      null
+      ||
+      peak.longitude ===
+      null
+    ) {
+
+      return (
+        `🏔️ Am găsit ${peak.name}, dar nu am găsit coordonatele.`
+      )
+
+    }
+
+
+    return (
+
+`📍 ${peak.name}
+
+Latitudine: ${peak.latitude.toFixed(6)}
+Longitudine: ${peak.longitude.toFixed(6)}`
+
+    )
+
+  }
+
+
+  // ===================================================
+  // UNDE SE AFLĂ?
+  // ===================================================
+
+  async function answerPeakLocation(
+
+    question:
+      string,
+
+    forcedName?:
+      string
+
+  ) {
+
+    const peakName =
+      resolvePeakName(
+
+        question,
+
+        forcedName
+
+      )
+
+
+    if (
+      !peakName
+    ) {
+
+      return (
+        'Spune-mi numele vârfului.'
+      )
+
+    }
+
+
+    const peak =
+      await findPeakFacts(
+        peakName
+      )
+
+
+    if (
+      !peak
+    ) {
+
+      return (
+        `❌ Nu am reușit să identific sigur vârful „${peakName}”.`
+      )
+
+    }
+
+
+    rememberPeak(
+      peakName,
+      'location'
+    )
+
+
+    const lines:
+      string[] =
+      [
+
+        `📍 ${peak.name}`
+
+      ]
+
+
+    if (
+      peak.mountainRanges
+        .length >
+      0
+    ) {
+
+      lines.push(
+
+        `Masiv: ${peak.mountainRanges.join(', ')}`
+
+      )
+
+    }
+
+
+    if (
+      peak.locations
+        .length >
+      0
+    ) {
+
+      lines.push(
+
+        `Locație: ${peak.locations.join(', ')}`
+
+      )
+
+    }
+
+
+    if (
+      peak.country
+    ) {
+
+      lines.push(
+
+        `Țară: ${peak.country}`
+
+      )
+
+    }
+
+
+    if (
+      peak.latitude !==
+      null
+      &&
+      peak.longitude !==
+      null
+    ) {
+
+      lines.push(
+
+        `Coordonate: ${peak.latitude.toFixed(5)}, ${peak.longitude.toFixed(5)}`
+
+      )
+
+    }
+
+
+    return lines.join(
+      '\n'
+    )
+
+  }
+
+
+  // ===================================================
+  // CEL MAI ÎNALT VÂRF DINTR-UN MASIV
+  // ===================================================
+
+  async function answerHighestInRange(
+    question: string
+  ) {
+
+    const rangeHint =
+      extractRangeHint(
+        question
+      )
+
+
+    if (
+      !rangeHint
+    ) {
+
+      return (
+        'Spune-mi masivul. De exemplu: „Care este cel mai înalt vârf din Munții Bucegi?”'
+      )
+
+    }
+
+
+    const range =
+      await findMountainRangeEntity(
+        rangeHint
+      )
+
+
+    if (
+      !range
+    ) {
+
+      return (
+        `❌ Nu am reușit să identific masivul „${rangeHint}”.`
+      )
+
+    }
 
 
     const highest =
-      [...uniquePeaks]
-        .sort(
-          (a, b) =>
-            b.elevation -
-            a.elevation
-        )[0]
+      await getHighestPointFromEntity(
+        range.entity
+      )
+
+
+    if (
+      !highest
+    ) {
+
+      return (
+        `Am găsit ${range.name}, dar Wikidata nu indică un cel mai înalt punct pentru acest masiv.`
+      )
+
+    }
+
+
+    const elevationText =
+
+      highest.elevation !==
+      null
+
+        ? `${highest.elevation} m`
+
+        : 'altitudine necunoscută'
 
 
     return (
-`🏆 Cel mai înalt vârf pe care l-ai vizitat este:
 
-🏔️ ${highest.name}
+`🏆 Cel mai înalt vârf din ${range.name} este:
 
-Altitudine: ${highest.elevation} m`
+${highest.name} — ${elevationText}`
+
     )
 
   }
 
 
   // ===================================================
-  // CE VÂRFURI AM VIZITAT
+  // CEL MAI ÎNALT VÂRF DIN ROMÂNIA
+  // ===================================================
+
+  async function answerHighestInRomania() {
+
+    /*
+      Q218 = România
+    */
+
+    const entities =
+      await getWikidataEntities([
+        'Q218'
+      ])
+
+
+    const romania =
+      entities[0]
+
+
+    if (
+      !romania
+    ) {
+
+      return (
+        'Nu am putut obține momentan datele despre România.'
+      )
+
+    }
+
+
+    const highest =
+      await getHighestPointFromEntity(
+        romania
+      )
+
+
+    if (
+      !highest
+    ) {
+
+      return (
+        'Nu am găsit momentan cel mai înalt punct al României.'
+      )
+
+    }
+
+
+    const elevationText =
+
+      highest.elevation !==
+      null
+
+        ? `${highest.elevation} m`
+
+        : 'altitudine necunoscută'
+
+
+    return (
+
+`🇷🇴 Cel mai înalt vârf din România este:
+
+${highest.name} — ${elevationText}`
+
+    )
+
+  }
+
+
+  // ===================================================
+  // CE VÂRFURI AM VIZITAT?
   // ===================================================
 
   async function answerVisitedPeaks() {
@@ -3177,98 +5331,57 @@ Altitudine: ${highest.elevation} m`
       0
     ) {
 
-      const possiblePeaks =
-        visits.filter(
-          (visit) => {
-
-            const text =
-              normalizeText(
-                `${visit.place_name ?? ''} ` +
-                `${visit.location_details ?? ''}`
-              )
-
-
-            return (
-              visit.is_peak
-              ||
-              text.includes(
-                'vf'
-              )
-            )
-
-          }
-        )
-
-
-      if (
-        possiblePeaks.length ===
-        0
-      ) {
-
-        return (
-          'Nu am identificat încă vârfuri printre locațiile tale.'
-        )
-
-      }
-
-
-      const list =
-        possiblePeaks
-          .map(
-            (visit, index) =>
-              `${index + 1}. ${
-                visit.place_name
-                ||
-                visit.location_details
-                ||
-                'Locație montană'
-              }`
-          )
-          .join('\n')
-
-
       return (
-`🏔️ Am găsit aceste locații asociate unor vârfuri:
-
-${list}`
+        'Nu am reușit să identific încă vârfuri printre locațiile tale.'
       )
 
     }
 
 
-    const uniquePeaks =
+    const unique =
       getUniquePeaks(
         identified
       )
 
-
-    uniquePeaks.sort(
-      (a, b) =>
-        b.elevation -
-        a.elevation
-    )
+        .sort(
+          (a, b) =>
+            b.elevation -
+            a.elevation
+        )
 
 
     const list =
-      uniquePeaks
+      unique
+
         .map(
-          (peak, index) =>
+
+          (
+            peak,
+            index
+          ) =>
+
             `${index + 1}. ${peak.name} — ${peak.elevation} m`
+
         )
-        .join('\n')
+
+        .join(
+          '\n'
+        )
 
 
     return (
-`🏔️ Vârfurile pe care le pot identifica dintre vizitele tale:
+
+`🏔️ Vârfurile identificate dintre vizitele tale:
 
 ${list}`
+
     )
 
   }
 
 
   // ===================================================
-  // CÂTE VÂRFURI AM VIZITAT
+  // CÂTE VÂRFURI AM VIZITAT?
   // ===================================================
 
   async function answerVisitedPeakCount() {
@@ -3277,77 +5390,86 @@ ${list}`
       await getVisitedPeaksCached()
 
 
+    const count =
+      getUniquePeaks(
+        identified
+      )
+        .length
+
+
     if (
-      identified.length >
+      count ===
       0
     ) {
 
-      const uniquePeaks =
-        getUniquePeaks(
-          identified
-        )
-
-
-      const count =
-        uniquePeaks.length
-
-
-      if (
-        count ===
-        1
-      ) {
-
-        return (
-          '🏔️ Ai vizitat 1 vârf identificat în PeakQuest.'
-        )
-
-      }
-
-
       return (
-        `🏔️ Ai vizitat ${count} vârfuri identificate în PeakQuest.`
+        'Nu am identificat încă niciun vârf dintre locațiile tale.'
       )
 
     }
 
 
-    const possiblePeaks =
-      visits.filter(
-        (visit) => {
-
-          const text =
-            normalizeText(
-              `${visit.place_name ?? ''} ` +
-              `${visit.location_details ?? ''}`
-            )
-
-
-          return (
-            visit.is_peak
-            ||
-            text.includes(
-              'vf'
-            )
-          )
-
-        }
-      )
-
-
     if (
-      possiblePeaks.length ===
-      0
+      count ===
+      1
     ) {
 
       return (
-        'Nu am putut identifica încă vârfuri printre locațiile tale.'
+        '🏔️ Ai vizitat 1 vârf identificat în PeakQuest.'
       )
 
     }
 
 
     return (
-      `🏔️ Am găsit ${possiblePeaks.length} locație${possiblePeaks.length === 1 ? '' : 'i'} asociată${possiblePeaks.length === 1 ? '' : 'e'} unor vârfuri.`
+      `🏔️ Ai vizitat ${count} vârfuri identificate în PeakQuest.`
+    )
+
+  }
+
+
+  // ===================================================
+  // CEL MAI ÎNALT VÂRF VIZITAT
+  // ===================================================
+
+  async function answerHighestVisitedPeak() {
+
+    const identified =
+      await getVisitedPeaksCached()
+
+
+    if (
+      identified.length ===
+      0
+    ) {
+
+      return (
+        'Nu am reușit să identific încă un vârf cu altitudine dintre locațiile tale.'
+      )
+
+    }
+
+
+    const highest =
+      getUniquePeaks(
+        identified
+      )
+
+        .sort(
+          (a, b) =>
+            b.elevation -
+            a.elevation
+        )[0]
+
+
+    return (
+
+`🏆 Cel mai înalt vârf pe care l-ai vizitat este:
+
+${highest.name}
+
+Altitudine: ${highest.elevation} m`
+
     )
 
   }
@@ -3367,10 +5489,12 @@ ${list}`
       )
 
 
-    if (!searchedName) {
+    if (
+      !searchedName
+    ) {
 
       return (
-        'Spune-mi ce vârf vrei să verific. De exemplu: „Am fost pe Vârful Omu?”'
+        'Spune-mi ce vârf vrei să verific.'
       )
 
     }
@@ -3383,7 +5507,7 @@ ${list}`
 
 
     // =================================================
-    // CĂUTARE DIRECT ÎN SUPABASE
+    // CĂUTĂM DIRECT ÎN SUPABASE
     // =================================================
 
     const directVisit =
@@ -3391,10 +5515,18 @@ ${list}`
         (visit) => {
 
           const visitText =
-            normalizeText(
-              `${visit.place_name ?? ''} ` +
-              `${visit.location_details ?? ''} ` +
+            normalizePeakName(
+
+              `${visit.place_name ?? ''} `
+
+              +
+
+              `${visit.location_details ?? ''} `
+
+              +
+
               `${visit.description ?? ''}`
+
             )
 
 
@@ -3411,18 +5543,20 @@ ${list}`
     ) {
 
       return (
+
 `✅ Da.
 
 Am găsit această locație în vizitele tale:
 
 📍 ${directVisit.place_name || directVisit.location_details || searchedName}`
+
       )
 
     }
 
 
     // =================================================
-    // VÂRFURI IDENTIFICATE EXTERN
+    // CĂUTĂM ÎN VÂRFURILE IDENTIFICATE
     // =================================================
 
     const identified =
@@ -3440,13 +5574,22 @@ Am găsit această locație în vizitele tale:
 
 
           return (
+
+            name ===
+            normalizedName
+
+            ||
+
             name.includes(
               normalizedName
             )
+
             ||
+
             normalizedName.includes(
               name
             )
+
           )
 
         }
@@ -3458,13 +5601,13 @@ Am găsit această locație în vizitele tale:
     ) {
 
       return (
+
 `✅ Da.
 
-După coordonatele fotografiei tale am identificat:
+După coordonatele unei fotografii am identificat:
 
-🏔️ ${externalMatch.name}
+${externalMatch.name} — ${externalMatch.elevation} m`
 
-Altitudine: ${externalMatch.elevation} m`
       )
 
     }
@@ -3478,7 +5621,370 @@ Altitudine: ${externalMatch.elevation} m`
 
 
   // ===================================================
-  // INTERPRETARE ÎNTREBARE
+  // CE VÂRFURI DIN MASIV AM VIZITAT?
+  // ===================================================
+
+  async function answerVisitedPeaksInRange(
+    question: string
+  ) {
+
+    /*
+      Întâi varianta:
+      din Munții Făgăraș
+    */
+
+    let rangeHint =
+      extractRangeHint(
+        question
+      )
+
+
+    /*
+      Apoi varianta:
+      "Ce vârfuri din Făgăraș am vizitat?"
+    */
+
+    if (
+      !rangeHint
+    ) {
+
+      const text =
+        plainNormalize(
+          question
+        )
+
+
+      const match =
+        text.match(
+          /\bdin\s+(.+?)\s+am\s+vizitat\b/
+        )
+
+
+      if (
+        match?.[1]
+      ) {
+
+        rangeHint =
+          normalizeRangeName(
+            match[1]
+          )
+
+      }
+
+    }
+
+
+    if (
+      !rangeHint
+    ) {
+
+      return (
+        'Spune-mi masivul. De exemplu: „Ce vârfuri din Făgăraș am vizitat?”'
+      )
+
+    }
+
+
+    const peaks =
+      getUniquePeaks(
+
+        await getVisitedPeaksCached()
+
+      )
+
+
+    if (
+      peaks.length ===
+      0
+    ) {
+
+      return (
+        'Nu am identificat încă vârfuri dintre locațiile tale.'
+      )
+
+    }
+
+
+    const wanted =
+      normalizeRangeName(
+        rangeHint
+      )
+
+
+    /*
+      Pentru fiecare vârf vizitat
+      verificăm masivul în Wikidata.
+    */
+
+    const enriched =
+      await Promise.all(
+
+        peaks.map(
+
+          async (
+            peak
+          ) => {
+
+            const facts =
+              await findPeakFacts(
+                peak.name
+              )
+
+
+            return {
+
+              peak,
+
+              ranges:
+
+                facts
+                  ?.mountainRanges
+
+                ??
+
+                (
+                  peak.mountainRange
+
+                    ? [
+                        peak.mountainRange
+                      ]
+
+                    : []
+                )
+
+            }
+
+          }
+
+        )
+
+      )
+
+
+    const matched =
+      enriched.filter(
+        (item) =>
+
+          item.ranges.some(
+            (range) => {
+
+              const normalized =
+                normalizeRangeName(
+                  range
+                )
+
+
+              return (
+
+                normalized ===
+                wanted
+
+                ||
+
+                normalized.includes(
+                  wanted
+                )
+
+                ||
+
+                wanted.includes(
+                  normalized
+                )
+
+              )
+
+            }
+          )
+
+      )
+
+
+    if (
+      matched.length ===
+      0
+    ) {
+
+      return (
+        `Nu am identificat vârfuri vizitate de tine în ${humanizeRangeName(rangeHint)}.`
+      )
+
+    }
+
+
+    const list =
+      matched
+
+        .sort(
+          (a, b) =>
+            b.peak.elevation -
+            a.peak.elevation
+        )
+
+        .map(
+
+          (
+            item,
+            index
+          ) =>
+
+            `${index + 1}. ${item.peak.name} — ${item.peak.elevation} m`
+
+        )
+
+        .join(
+          '\n'
+        )
+
+
+    return (
+
+`🏔️ Vârfurile tale din ${humanizeRangeName(rangeHint)}:
+
+${list}`
+
+    )
+
+  }
+
+
+  // ===================================================
+  // FOLLOW-UP
+  // ===================================================
+
+  async function answerFollowUp(
+    question: string
+  ) {
+
+    const explicitName =
+      extractPeakName(
+        question
+      )
+
+
+    const intent =
+      lastIntentRef.current
+
+
+    if (
+      !intent
+    ) {
+
+      return null
+
+    }
+
+
+    if (
+      !explicitName
+      &&
+      !lastPeakNameRef.current
+    ) {
+
+      return null
+
+    }
+
+
+    const peakName =
+
+      explicitName
+
+      ||
+
+      lastPeakNameRef.current
+
+      ||
+
+      undefined
+
+
+    /*
+      Ex:
+
+      Ce altitudine are Negoiu?
+      Dar Moldoveanu?
+    */
+
+    if (
+      intent ===
+      'elevation'
+    ) {
+
+      return await
+        answerPeakElevation(
+
+          question,
+
+          peakName
+
+        )
+
+    }
+
+
+    /*
+      În ce masiv e Omu?
+      Dar Moldoveanu?
+    */
+
+    if (
+      intent ===
+      'range'
+    ) {
+
+      return await
+        answerPeakRange(
+
+          question,
+
+          peakName
+
+        )
+
+    }
+
+
+    if (
+      intent ===
+      'location'
+    ) {
+
+      return await
+        answerPeakLocation(
+
+          question,
+
+          peakName
+
+        )
+
+    }
+
+
+    if (
+      intent ===
+      'coordinates'
+    ) {
+
+      return await
+        answerPeakCoordinates(
+
+          question,
+
+          peakName
+
+        )
+
+    }
+
+
+    return null
+
+  }
+
+
+  // ===================================================
+  // INTERPRETAREA ÎNTREBĂRII
   // ===================================================
 
   async function generateAnswer(
@@ -3492,45 +5998,55 @@ Altitudine: ${externalMatch.elevation} m`
 
 
     // =================================================
-    // CEL MAI ÎNALT
+    // CEL MAI ÎNALT VÂRF VIZITAT
     // =================================================
 
     if (
+
       (
         normalized.includes(
           'cel mai inalt'
         )
+
         ||
+
         normalized.includes(
           'cea mai mare altitudine'
         )
-        ||
-        normalized.includes(
-          'cea mai inalta'
-        )
       )
+
       &&
+
       (
         normalized.includes(
           'vizitat'
         )
+
         ||
+
         normalized.includes(
           'am fost'
         )
+
         ||
+
         normalized.includes(
           'meu'
         )
+
         ||
+
         normalized.includes(
           'mele'
         )
+
         ||
+
         normalized.includes(
           'mine'
         )
       )
+
     ) {
 
       return await
@@ -3540,33 +6056,133 @@ Altitudine: ${externalMatch.elevation} m`
 
 
     // =================================================
-    // CÂTE VÂRFURI
+    // CEL MAI ÎNALT DIN ROMÂNIA
     // =================================================
 
     if (
+
+      normalized.includes(
+        'cel mai inalt'
+      )
+
+      &&
+
+      normalized.includes(
+        'romania'
+      )
+
+    ) {
+
+      return await
+        answerHighestInRomania()
+
+    }
+
+
+    // =================================================
+    // CEL MAI ÎNALT DINTR-UN MASIV
+    // =================================================
+
+    if (
+
+      normalized.includes(
+        'cel mai inalt'
+      )
+
+      &&
+
+      (
+        normalized.includes(
+          'din muntii'
+        )
+
+        ||
+
+        normalized.includes(
+          'din masiv'
+        )
+      )
+
+    ) {
+
+      return await
+        answerHighestInRange(
+          question
+        )
+
+    }
+
+
+    // =================================================
+    // VÂRFURI VIZITATE DINTR-UN MASIV
+    // =================================================
+
+    if (
+
+      (
+        normalized.includes(
+          'ce vf'
+        )
+
+        ||
+
+        normalized.includes(
+          'care vf'
+        )
+
+        ||
+
+        normalized.includes(
+          'care dintre vf'
+        )
+      )
+
+      &&
+
+      normalized.includes(
+        'vizitat'
+      )
+
+      &&
+
+      normalized.includes(
+        'din'
+      )
+
+    ) {
+
+      return await
+        answerVisitedPeaksInRange(
+          question
+        )
+
+    }
+
+
+    // =================================================
+    // CÂTE VÂRFURI AM VIZITAT
+    // =================================================
+
+    if (
+
       (
         normalized.includes(
           'cate vf'
         )
+
         ||
+
         normalized.includes(
           'cati vf'
         )
-        ||
-        normalized.startsWith(
-          'cate vf'
-        )
       )
+
       &&
-      (
-        normalized.includes(
-          'vizitat'
-        )
-        ||
-        normalized.includes(
-          'am fost'
-        )
+
+      normalized.includes(
+        'vizitat'
       )
+
     ) {
 
       return await
@@ -3576,29 +6192,29 @@ Altitudine: ${externalMatch.elevation} m`
 
 
     // =================================================
-    // CE VÂRFURI
+    // CE VÂRFURI AM VIZITAT
     // =================================================
 
     if (
+
       (
         normalized.includes(
           'ce vf'
         )
+
         ||
+
         normalized.includes(
           'care vf'
         )
       )
+
       &&
-      (
-        normalized.includes(
-          'vizitat'
-        )
-        ||
-        normalized.includes(
-          'am fost'
-        )
+
+      normalized.includes(
+        'vizitat'
       )
+
     ) {
 
       return await
@@ -3612,17 +6228,17 @@ Altitudine: ${externalMatch.elevation} m`
     // =================================================
 
     if (
+
       normalized.startsWith(
         'am fost'
       )
+
       ||
+
       normalized.startsWith(
         'am vizitat'
       )
-      ||
-      normalized.includes(
-        'am fost pe'
-      )
+
     ) {
 
       return await
@@ -3634,21 +6250,129 @@ Altitudine: ${externalMatch.elevation} m`
 
 
     // =================================================
-    // ALTITUDINE EXTERNĂ
+    // ÎN CE MASIV / MUNȚI?
     // =================================================
 
     if (
+
+      normalized.includes(
+        'in ce masiv'
+      )
+
+      ||
+
+      normalized.includes(
+        'din ce masiv'
+      )
+
+      ||
+
+      normalized.includes(
+        'ce masiv'
+      )
+
+      ||
+
+      normalized.includes(
+        'in ce munti'
+      )
+
+      ||
+
+      normalized.includes(
+        'din ce munti'
+      )
+
+    ) {
+
+      return await
+        answerPeakRange(
+          question
+        )
+
+    }
+
+
+    // =================================================
+    // COORDONATE
+    // =================================================
+
+    if (
+
+      normalized.includes(
+        'coordonate'
+      )
+
+      ||
+
+      normalized.includes(
+        'latitudine si longitudine'
+      )
+
+    ) {
+
+      return await
+        answerPeakCoordinates(
+          question
+        )
+
+    }
+
+
+    // =================================================
+    // UNDE SE AFLĂ?
+    // =================================================
+
+    if (
+
+      normalized.startsWith(
+        'unde'
+      )
+
+      ||
+
+      normalized.includes(
+        'unde se afla'
+      )
+
+      ||
+
+      normalized.includes(
+        'unde este'
+      )
+
+    ) {
+
+      return await
+        answerPeakLocation(
+          question
+        )
+
+    }
+
+
+    // =================================================
+    // ALTITUDINE
+    // =================================================
+
+    if (
+
       normalized.includes(
         'altitudine'
       )
+
       ||
+
       normalized.includes(
         'inaltime'
       )
+
       ||
+
       normalized.includes(
         'inalt'
       )
+
     ) {
 
       return await
@@ -3660,23 +6384,82 @@ Altitudine: ${externalMatch.elevation} m`
 
 
     // =================================================
+    // FOLLOW-UP
+    //
+    // „Și în ce masiv este?”
+    // „Dar Moldoveanu?”
+    // =================================================
+
+    if (
+
+      normalized.startsWith(
+        'si '
+      )
+
+      ||
+
+      normalized.startsWith(
+        'dar '
+      )
+
+      ||
+
+      normalized.startsWith(
+        'iar '
+      )
+
+      ||
+
+      normalized
+        .split(' ')
+        .length <=
+      3
+
+    ) {
+
+      const followUp =
+        await answerFollowUp(
+          question
+        )
+
+
+      if (
+        followUp
+      ) {
+
+        return followUp
+
+      }
+
+    }
+
+
+    // =================================================
     // FALLBACK
     // =================================================
 
     return (
+
 `Momentan pot răspunde la întrebări precum:
 
 🏔️ Ce altitudine are Vârful Negoiu?
 
-🏔️ Ce altitudine are Moldoveanu?
+🏔️ Ce altitudine are Vârful Greci din Munții Măcin?
 
-🏆 Care este cel mai înalt vârf pe care l-am vizitat?
+🗻 În ce masiv se află Vârful Omu?
 
-📍 Ce vârfuri am vizitat?
+📍 Unde se află Moldoveanu?
 
-🔢 Câte vârfuri am vizitat?
+🧭 Ce coordonate are Vârful Omu?
 
-✅ Am fost pe Vârful Omu?`
+🏆 Care este cel mai înalt vârf din Munții Bucegi?
+
+🇷🇴 Care este cel mai înalt vârf din România?
+
+🥾 Ce vârfuri din Făgăraș am vizitat?
+
+🏆 Care este cel mai înalt vârf pe care l-am vizitat?`
+
     )
 
   }
@@ -3699,7 +6482,8 @@ Altitudine: ${externalMatch.elevation} m`
 
 
     if (
-      !question ||
+      !question
+      ||
       loading
     ) {
 
@@ -3710,6 +6494,7 @@ Altitudine: ${externalMatch.elevation} m`
 
     const userMessage:
       ChatMessage = {
+
       id:
         Date.now(),
 
@@ -3718,13 +6503,17 @@ Altitudine: ${externalMatch.elevation} m`
 
       text:
         question
+
     }
 
 
     setMessages(
       (current) => [
+
         ...current,
+
         userMessage
+
       ]
     )
 
@@ -3749,18 +6538,23 @@ Altitudine: ${externalMatch.elevation} m`
 
       setMessages(
         (current) => [
+
           ...current,
 
           {
+
             id:
-              Date.now() + 1,
+              Date.now() +
+              1,
 
             role:
               'bot',
 
             text:
               answer
+
           }
+
         ]
       )
 
@@ -3776,11 +6570,14 @@ Altitudine: ${externalMatch.elevation} m`
 
       setMessages(
         (current) => [
+
           ...current,
 
           {
+
             id:
-              Date.now() + 1,
+              Date.now() +
+              1,
 
             role:
               'bot',
@@ -3789,7 +6586,9 @@ Altitudine: ${externalMatch.elevation} m`
 `❌ Nu am reușit să obțin informațiile externe momentan.
 
 Încearcă din nou peste câteva secunde.`
+
           }
+
         ]
       )
 
@@ -3814,189 +6613,245 @@ Altitudine: ${externalMatch.elevation} m`
 
     <>
 
-      {open && (
+      {
+        open
+        &&
+        (
 
-        <section
-          className="peakquest-chat"
-          aria-label="PeakQuest Bot"
-        >
+          <section
 
-          {/* =================================================
-              HEADER
-          ================================================= */}
+            className="peakquest-chat"
 
-          <div className="chat-header">
+            aria-label="PeakQuest Bot"
 
-            <div className="chat-header-left">
-
-              <div className="chat-avatar">
-                🏔️
-              </div>
+          >
 
 
-              <div>
+            {/* ===========================================
+                HEADER
+            =========================================== */}
 
-                <div className="chat-title">
-                  PeakQuest Bot
+            <div className="chat-header">
+
+
+              <div className="chat-header-left">
+
+
+                <div className="chat-avatar">
+
+                  🏔️
+
                 </div>
 
 
-                <div className="chat-subtitle">
-                  Asistent montan
+                <div>
+
+
+                  <div className="chat-title">
+
+                    PeakQuest Bot
+
+                  </div>
+
+
+                  <div className="chat-subtitle">
+
+                    Asistent montan
+
+                  </div>
+
+
                 </div>
 
+
               </div>
+
+
+              <button
+
+                className="chat-close"
+
+                type="button"
+
+                title="Închide chat-ul"
+
+                onClick={() =>
+                  setOpen(
+                    false
+                  )
+                }
+
+              >
+
+                ×
+
+              </button>
+
 
             </div>
 
 
-            <button
-              className="chat-close"
-              type="button"
-              title="Închide chat-ul"
+            {/* ===========================================
+                MESAJE
+            =========================================== */}
 
-              onClick={() =>
-                setOpen(
-                  false
+            <div className="chat-messages">
+
+
+              {
+                messages.map(
+
+                  (message) => (
+
+                    <div
+
+                      key={
+                        message.id
+                      }
+
+                      className={
+                        message.role ===
+                        'user'
+
+                          ? 'chat-message-row user'
+
+                          : 'chat-message-row bot'
+                      }
+
+                    >
+
+
+                      <div
+
+                        className={
+                          message.role ===
+                          'user'
+
+                            ? 'chat-message user'
+
+                            : 'chat-message bot'
+                        }
+
+                      >
+
+                        {
+                          message.text
+                        }
+
+                      </div>
+
+
+                    </div>
+
+                  )
+
                 )
               }
-            >
-
-              ×
-
-            </button>
-
-          </div>
 
 
-          {/* =================================================
-              MESAJE
-          ================================================= */}
+              {/* =========================================
+                  LOADING
+              ========================================= */}
 
-          <div className="chat-messages">
+              {
+                loading
+                &&
+                (
 
-            {messages.map(
-              (message) => (
+                  <div className="chat-message-row bot">
 
-                <div
-                  key={
-                    message.id
-                  }
 
-                  className={
-                    message.role ===
-                    'user'
-                      ? 'chat-message-row user'
-                      : 'chat-message-row bot'
-                  }
-                >
+                    <div className="chat-message bot loading">
 
-                  <div
-                    className={
-                      message.role ===
-                      'user'
-                        ? 'chat-message user'
-                        : 'chat-message bot'
-                    }
-                  >
+                      <span />
 
-                    {message.text}
+                      <span />
+
+                      <span />
+
+                    </div>
+
 
                   </div>
 
-                </div>
-
-              )
-            )}
-
-
-            {/* =================================================
-                LOADING
-            ================================================= */}
-
-            {loading && (
-
-              <div
-                className="chat-message-row bot"
-              >
-
-                <div
-                  className="chat-message bot loading"
-                >
-
-                  <span />
-                  <span />
-                  <span />
-
-                </div>
-
-              </div>
-
-            )}
-
-
-            <div
-              ref={
-                messagesEndRef
-              }
-            />
-
-          </div>
-
-
-          {/* =================================================
-              INPUT
-          ================================================= */}
-
-          <form
-            className="chat-input-area"
-
-            onSubmit={
-              sendMessage
-            }
-          >
-
-            <input
-              type="text"
-
-              value={
-                input
-              }
-
-              disabled={
-                loading
-              }
-
-              placeholder="Întreabă ceva..."
-
-              onChange={(e) =>
-                setInput(
-                  e.target.value
                 )
               }
-            />
 
 
-            <button
-              type="submit"
+              <div
+                ref={
+                  messagesEndRef
+                }
+              />
 
-              title="Trimite"
 
-              disabled={
-                loading ||
-                !input.trim()
+            </div>
+
+
+            {/* ===========================================
+                INPUT
+            =========================================== */}
+
+            <form
+
+              className="chat-input-area"
+
+              onSubmit={
+                sendMessage
               }
+
             >
 
-              ➤
 
-            </button>
+              <input
 
-          </form>
+                type="text"
 
-        </section>
+                value={
+                  input
+                }
 
-      )}
+                disabled={
+                  loading
+                }
+
+                placeholder="Întreabă ceva..."
+
+                onChange={(e) =>
+                  setInput(
+                    e.target.value
+                  )
+                }
+
+              />
+
+
+              <button
+
+                type="submit"
+
+                title="Trimite"
+
+                disabled={
+                  loading
+                  ||
+                  !input.trim()
+                }
+
+              >
+
+                ➤
+
+              </button>
+
+
+            </form>
+
+
+          </section>
+
+        )
+      }
 
 
       {/* =================================================
@@ -4004,9 +6859,12 @@ Altitudine: ${externalMatch.elevation} m`
       ================================================= */}
 
       <button
+
         className={
           open
+
             ? 'peakquest-chat-toggle open'
+
             : 'peakquest-chat-toggle'
         }
 
@@ -4019,14 +6877,19 @@ Altitudine: ${externalMatch.elevation} m`
             !open
           )
         }
+
       >
 
-        {open
-          ? '×'
-          : '💬'
+        {
+          open
+
+            ? '×'
+
+            : '💬'
         }
 
       </button>
+
 
     </>
 
