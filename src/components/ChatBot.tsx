@@ -56,11 +56,8 @@ type OsmPeak = {
 
   tags?: {
     name?: string
-
     'name:ro'?: string
-
     alt_name?: string
-
     ele?: string
 
     [key: string]:
@@ -90,14 +87,60 @@ type IdentifiedPeak = {
 }
 
 
+type ElevationSource =
+  'open-meteo-geocoding'
+  |
+  'open-meteo-dem'
+  |
+  'osm'
+  |
+  'nominatim'
+
+
 type PeakLookupResult = {
   name: string
 
   elevation:
     number | null
 
-  latitude: number
-  longitude: number
+  latitude:
+    number
+
+  longitude:
+    number
+
+  source:
+    ElevationSource
+}
+
+
+type OpenMeteoLocation = {
+  id?: number
+
+  name?: string
+
+  latitude?: number
+  longitude?: number
+
+  elevation?: number
+
+  feature_code?: string
+
+  country_code?: string
+
+  country?: string
+
+  admin1?: string
+}
+
+
+type OpenMeteoSearchResponse = {
+  results?: OpenMeteoLocation[]
+}
+
+
+type OpenMeteoElevationResponse = {
+  elevation?: number[]
 }
 
 
@@ -135,56 +178,48 @@ type NominatimResult = {
 // CONFIG
 // =====================================================
 
-const OVERPASS_URLS = [
+const OPEN_METEO_GEOCODING_URL =
+  'https://geocoding-api.open-meteo.com/v1/search'
 
-  'https://overpass-api.de/api/interpreter',
 
-  'https://overpass.kumi.systems/api/interpreter'
-
-]
+const OPEN_METEO_ELEVATION_URL =
+  'https://api.open-meteo.com/v1/elevation'
 
 
 const NOMINATIM_SEARCH_URL =
   'https://nominatim.openstreetmap.org/search'
 
 
-/*
-  La vizitele utilizatorului căutăm
-  vârfuri într-o rază de 1.5 km.
-*/
+const OVERPASS_URLS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter'
+]
+
+
+// =====================================================
+// DISTANȚE
+// =====================================================
 
 const VISIT_PEAK_SEARCH_RADIUS =
   1500
 
-
-/*
-  Dacă fotografia este la maximum
-  500 m de vârf, acceptăm automat
-  că este foarte aproape.
-*/
 
 const STRICT_PEAK_DISTANCE =
   500
 
 
 /*
-  Dacă numele vârfului apare explicit
-  în locația salvată, permitem o
-  distanță mai mare.
+  Dacă numele apare explicit în
+  locația salvată:
 
-  Exemplu:
-  "Traseu ... Vârful Omu ..."
+  "Traseu ... Vârful Omu"
+
+  putem permite o distanță mai mare.
 */
 
 const NAMED_PEAK_MAX_DISTANCE =
   8000
 
-
-/*
-  Când Nominatim găsește coordonatele
-  unui vârf, căutăm în jurul lor
-  pentru a găsi obiectul natural=peak.
-*/
 
 const PEAK_NAME_COORDINATE_RADIUS =
   3000
@@ -195,7 +230,7 @@ const REQUEST_TIMEOUT =
 
 
 // =====================================================
-// CACHE GLOBAL PENTRU VÂRFURI CĂUTATE DUPĂ NUME
+// CACHE GLOBAL PENTRU CĂUTAREA VÂRFURILOR
 // =====================================================
 
 const peakLookupCache =
@@ -214,7 +249,6 @@ function normalizeText(
 ) {
 
   return text
-
     .toLowerCase()
 
     .normalize('NFD')
@@ -287,7 +321,6 @@ function normalizePeakName(
   return normalizeText(
     text
   )
-
     .replace(
       /^vf\s+/,
       ''
@@ -318,14 +351,11 @@ function parseElevation(
 
   const parsed =
     Number.parseFloat(
-
       String(value)
-
         .replace(
           ',',
           '.'
         )
-
     )
 
 
@@ -352,15 +382,10 @@ function parseElevation(
 // =====================================================
 
 function calculateDistance(
-
   lat1: number,
-
   lon1: number,
-
   lat2: number,
-
   lon2: number
-
 ) {
 
   const earthRadius =
@@ -400,56 +425,38 @@ function calculateDistance(
 
 
   const a =
-
     Math.sin(
       deltaLat / 2
     )
-
     *
-
     Math.sin(
       deltaLat / 2
     )
-
     +
-
     Math.cos(
       lat1Rad
     )
-
     *
-
     Math.cos(
       lat2Rad
     )
-
     *
-
     Math.sin(
       deltaLon / 2
     )
-
     *
-
     Math.sin(
       deltaLon / 2
     )
 
 
   const c =
-
-    2
-
-    *
-
+    2 *
     Math.atan2(
-
       Math.sqrt(a),
-
       Math.sqrt(
         1 - a
       )
-
     )
 
 
@@ -466,15 +473,9 @@ function calculateDistance(
 // =====================================================
 
 async function fetchWithTimeout(
-
   url: string,
-
-  options:
-    RequestInit = {},
-
-  timeout =
-    REQUEST_TIMEOUT
-
+  options: RequestInit = {},
+  timeout = REQUEST_TIMEOUT
 ) {
 
   const controller =
@@ -483,33 +484,25 @@ async function fetchWithTimeout(
 
   const timer =
     window.setTimeout(
-
       () => {
 
         controller.abort()
 
       },
-
       timeout
-
     )
 
 
   try {
 
     return await fetch(
-
       url,
-
       {
-
         ...options,
 
         signal:
           controller.signal
-
       }
-
     )
 
   }
@@ -521,6 +514,293 @@ async function fetchWithTimeout(
     )
 
   }
+
+}
+
+
+// =====================================================
+// NUME VÂRF OSM
+// =====================================================
+
+function getPeakName(
+  peak: OsmPeak
+) {
+
+  return (
+    peak.tags?.['name:ro']
+    ||
+    peak.tags?.name
+    ||
+    peak.tags?.alt_name
+    ||
+    'Vârf fără nume'
+  )
+
+}
+
+
+// =====================================================
+// ESCAPE REGEX
+// =====================================================
+
+function escapeRegex(
+  text: string
+) {
+
+  return text.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    '\\$&'
+  )
+
+}
+
+
+// =====================================================
+// SCOR NUME
+// =====================================================
+
+function getNameMatchScore(
+  candidateName: string,
+  requestedName: string
+) {
+
+  const candidate =
+    normalizePeakName(
+      candidateName
+    )
+
+
+  const requested =
+    normalizePeakName(
+      requestedName
+    )
+
+
+  if (
+    !candidate ||
+    !requested
+  ) {
+
+    return 100
+
+  }
+
+
+  if (
+    candidate ===
+    requested
+  ) {
+
+    return 0
+
+  }
+
+
+  if (
+    candidate.startsWith(
+      requested
+    )
+  ) {
+
+    return 1
+
+  }
+
+
+  if (
+    candidate.includes(
+      requested
+    )
+  ) {
+
+    return 2
+
+  }
+
+
+  if (
+    requested.includes(
+      candidate
+    )
+  ) {
+
+    return 3
+
+  }
+
+
+  const candidateWords =
+    candidate
+      .split(' ')
+      .filter(
+        Boolean
+      )
+
+
+  const requestedWords =
+    requested
+      .split(' ')
+      .filter(
+        Boolean
+      )
+
+
+  const commonWords =
+    requestedWords.filter(
+      (word) =>
+        candidateWords.includes(
+          word
+        )
+    )
+
+
+  if (
+    commonWords.length >
+    0
+  ) {
+
+    return 10
+
+  }
+
+
+  return 100
+
+}
+
+
+// =====================================================
+// EXTRAGEM NUMELE VÂRFULUI DIN ÎNTREBARE
+// =====================================================
+
+function extractPeakName(
+  question: string
+) {
+
+  let text =
+    normalizeText(
+      question
+    )
+
+
+  const phrases = [
+    'ce altitudine are',
+    'care este altitudinea',
+    'care e altitudinea',
+
+    'ce inaltime are',
+    'care este inaltimea',
+    'care e inaltimea',
+
+    'cat de inalt este',
+    'cat de inalt e',
+    'cat de inalt',
+
+    'unde este',
+    'unde e',
+    'unde se afla',
+
+    'am fost pe',
+    'am fost la',
+    'am vizitat',
+
+    'spune mi',
+    'spunemi',
+
+    'altitudinea',
+    'altitudine',
+
+    'inaltimea',
+    'inaltime',
+
+    'te rog',
+
+    'vf'
+  ]
+
+
+  for (
+    const phrase
+    of phrases
+  ) {
+
+    text =
+      text.replace(
+        phrase,
+        ' '
+      )
+
+  }
+
+
+  return text
+    .replace(
+      /\s+/g,
+      ' '
+    )
+    .trim()
+
+}
+
+
+// =====================================================
+// EXTRAGEM NUMELE VÂRFULUI DINTR-O VIZITĂ
+// =====================================================
+
+function extractPeakNameFromVisit(
+  visit: Visit
+) {
+
+  const text =
+    `${visit.place_name ?? ''} ${visit.location_details ?? ''}`
+
+
+  /*
+    Exemple:
+
+    Vârful Omu
+    Varful Omu
+    Vf. Omu
+  */
+
+  const match =
+    text.match(
+      /(?:Vârful|Varful|Vf\.?)\s+([^,;()–—-]+)/i
+    )
+
+
+  if (
+    match?.[1]
+  ) {
+
+    const result =
+      match[1]
+        .trim()
+
+
+    if (
+      result.length >=
+      2
+    ) {
+
+      return result
+
+    }
+
+  }
+
+
+  if (
+    visit.is_peak &&
+    visit.place_name
+  ) {
+
+    return visit.place_name
+
+  }
+
+
+  return null
 
 }
 
@@ -538,7 +818,7 @@ async function runOverpassQuery(
 
 
   for (
-    const overpassUrl
+    const url
     of OVERPASS_URLS
   ) {
 
@@ -546,32 +826,22 @@ async function runOverpassQuery(
 
       const response =
         await fetchWithTimeout(
-
-          overpassUrl,
-
+          url,
           {
-
             method:
               'POST',
 
             headers: {
-
               'Content-Type':
                 'application/x-www-form-urlencoded'
-
             },
 
             body:
-
               new URLSearchParams({
-
                 data:
                   query
-
               })
-
           }
-
         )
 
 
@@ -604,7 +874,7 @@ async function runOverpassQuery(
 
 
       console.log(
-        `Overpass indisponibil: ${overpassUrl}`,
+        `Overpass indisponibil: ${url}`,
         error
       )
 
@@ -617,7 +887,7 @@ async function runOverpassQuery(
     lastError
     ??
     new Error(
-      'Serviciile Overpass sunt indisponibile.'
+      'Overpass indisponibil.'
     )
   )
 
@@ -625,290 +895,512 @@ async function runOverpassQuery(
 
 
 // =====================================================
-// NUME VÂRF
+// OPEN-METEO - ELEVAȚIE DUPĂ COORDONATE
 // =====================================================
 
-function getPeakName(
-  peak: OsmPeak
-) {
+async function getOpenMeteoElevation(
+  latitude: number,
+  longitude: number
+): Promise<number | null> {
 
-  return (
+  try {
 
-    peak.tags
-      ?.['name:ro']
+    const params =
+      new URLSearchParams({
+        latitude:
+          String(
+            latitude
+          ),
 
-    ||
-
-    peak.tags
-      ?.name
-
-    ||
-
-    peak.tags
-      ?.alt_name
-
-    ||
-
-    'Vârf fără nume'
-
-  )
-
-}
+        longitude:
+          String(
+            longitude
+          )
+      })
 
 
-// =====================================================
-// ESCAPE REGEX
-// =====================================================
-
-function escapeRegex(
-  text: string
-) {
-
-  return text.replace(
-
-    /[.*+?^${}()|[\]\\]/g,
-
-    '\\$&'
-
-  )
-
-}
+    const response =
+      await fetchWithTimeout(
+        `${OPEN_METEO_ELEVATION_URL}?${params.toString()}`
+      )
 
 
-// =====================================================
-// EXTRAGEM NUMELE DIN ÎNTREBARE
-// =====================================================
+    if (
+      !response.ok
+    ) {
 
-function extractPeakName(
-  question: string
-) {
+      return null
 
-  let text =
-    normalizeText(
-      question
+    }
+
+
+    const data:
+      OpenMeteoElevationResponse =
+      await response.json()
+
+
+    if (
+      !Array.isArray(
+        data.elevation
+      )
+    ) {
+
+      return null
+
+    }
+
+
+    return parseElevation(
+      data.elevation[0]
+    )
+
+  }
+
+  catch (error) {
+
+    console.log(
+      'Open-Meteo elevation error:',
+      error
     )
 
 
-  const phrases = [
+    return null
 
-    'ce altitudine are',
+  }
 
-    'care este altitudinea',
-
-    'care e altitudinea',
-
-    'cat de inalt este',
-
-    'cat de inalt e',
-
-    'cat de inalt',
-
-    'unde este',
-
-    'unde e',
-
-    'unde se afla',
-
-    'am fost pe',
-
-    'am fost la',
-
-    'am vizitat',
-
-    'spune mi',
-
-    'spunemi',
-
-    'altitudinea',
-
-    'altitudine',
-
-    'inaltimea',
-
-    'inaltime',
-
-    'te rog',
-
-    'vf'
-
-  ]
+}
 
 
-  for (
-    const phrase
-    of phrases
+// =====================================================
+// SCOR PENTRU REZULTAT OPEN-METEO
+// =====================================================
+
+function scoreOpenMeteoLocation(
+  location: OpenMeteoLocation,
+  requestedName: string
+) {
+
+  const name =
+    location.name ??
+    ''
+
+
+  let score =
+    getNameMatchScore(
+      name,
+      requestedName
+    )
+
+
+  const featureCode =
+    String(
+      location.feature_code ??
+      ''
+    )
+      .toUpperCase()
+
+
+  /*
+    GeoNames folosește feature_code.
+
+    PK / PKS = peak(s)
+    MT = mountain
+  */
+
+  if (
+    featureCode ===
+    'PK'
   ) {
 
-    text =
-      text.replace(
-        phrase,
-        ' '
-      )
+    score -=
+      50
 
   }
 
 
-  return text
+  if (
+    featureCode ===
+    'PKS'
+  ) {
 
-    .replace(
-      /\s+/g,
-      ' '
+    score -=
+      40
+
+  }
+
+
+  if (
+    featureCode ===
+    'MT'
+  ) {
+
+    score -=
+      30
+
+  }
+
+
+  if (
+    featureCode.startsWith(
+      'PK'
     )
+  ) {
 
-    .trim()
+    score -=
+      20
+
+  }
+
+
+  if (
+    String(
+      location.country_code ??
+      ''
+    )
+      .toUpperCase() ===
+    'RO'
+  ) {
+
+    score -=
+      5
+
+  }
+
+
+  return score
 
 }
 
 
 // =====================================================
-// EXTRAGEM VÂRFUL DIN TEXTUL UNEI VIZITE
+// OPEN-METEO - CĂUTARE VÂRF DUPĂ NUME
 // =====================================================
 
-function extractPeakNameFromVisit(
-  visit: Visit
-) {
+async function findPeakWithOpenMeteo(
+  requestedName: string
+): Promise<PeakLookupResult | null> {
 
-  const text =
-    `${visit.place_name ?? ''} ${visit.location_details ?? ''}`
-
-
-  /*
-    Exemplu:
-
-    Traseu turistic Poiana Coștilei -
-    Vârful Omu (Banda Galbena), Bușteni...
-  */
-
-  const match =
-    text.match(
-      /(?:Vârful|Varful|Vf\.?)\s+([^,;()–—-]+)/i
+  const cleanName =
+    normalizePeakName(
+      requestedName
     )
 
 
-  if (
-    match?.[1]
+  if (!cleanName) {
+
+    return null
+
+  }
+
+
+  /*
+    Încercăm două forme.
+
+    De obicei:
+    "Negoiu"
+
+    este mai bun decât:
+    "Vârful Negoiu".
+  */
+
+  const searchVariants = [
+    cleanName,
+    `Vârful ${cleanName}`
+  ]
+
+
+  let allResults:
+    OpenMeteoLocation[] = []
+
+
+  for (
+    const searchName
+    of searchVariants
   ) {
 
-    const result =
-      match[1]
-        .trim()
+    try {
 
+      const params =
+        new URLSearchParams({
+          name:
+            searchName,
+
+          count:
+            '30',
+
+          language:
+            'ro',
+
+          format:
+            'json',
+
+          countryCode:
+            'RO'
+        })
+
+
+      const response =
+        await fetchWithTimeout(
+          `${OPEN_METEO_GEOCODING_URL}?${params.toString()}`
+        )
+
+
+      if (
+        !response.ok
+      ) {
+
+        continue
+
+      }
+
+
+      const data:
+        OpenMeteoSearchResponse =
+        await response.json()
+
+
+      if (
+        Array.isArray(
+          data.results
+        )
+      ) {
+
+        allResults.push(
+          ...data.results
+        )
+
+      }
+
+    }
+
+    catch (error) {
+
+      console.log(
+        'Open-Meteo geocoding error:',
+        error
+      )
+
+    }
+
+
+    /*
+      Dacă prima căutare a dat
+      rezultate, nu mai facem inutil
+      încă un request.
+    */
 
     if (
-      result.length >= 2
+      allResults.length >
+      0
     ) {
 
-      return result
+      break
 
     }
 
   }
 
 
+  if (
+    allResults.length ===
+    0
+  ) {
+
+    return null
+
+  }
+
+
+  // ===================================================
+  // ELIMINĂM DUPLICATE
+  // ===================================================
+
+  const uniqueResults =
+    new Map<
+      string,
+      OpenMeteoLocation
+    >()
+
+
+  for (
+    const result
+    of allResults
+  ) {
+
+    const key =
+      `${result.id ?? ''}-${result.latitude ?? ''}-${result.longitude ?? ''}`
+
+
+    uniqueResults.set(
+      key,
+      result
+    )
+
+  }
+
+
+  // ===================================================
+  // SORTARE
+  // ===================================================
+
+  const ranked =
+    Array.from(
+      uniqueResults.values()
+    )
+
+      .filter(
+        (item) =>
+          Number.isFinite(
+            Number(
+              item.latitude
+            )
+          )
+          &&
+          Number.isFinite(
+            Number(
+              item.longitude
+            )
+          )
+      )
+
+      .map(
+        (item) => ({
+          item,
+
+          score:
+            scoreOpenMeteoLocation(
+              item,
+              cleanName
+            )
+        })
+      )
+
+      .sort(
+        (a, b) =>
+          a.score -
+          b.score
+      )
+
+
+  if (
+    ranked.length ===
+    0
+  ) {
+
+    return null
+
+  }
+
+
   /*
-    Dacă vizita era deja marcată
-    explicit ca vârf, folosim
-    place_name.
+    Nu acceptăm un rezultat care
+    nu seamănă deloc cu numele.
   */
 
+  const acceptable =
+    ranked.find(
+      (candidate) =>
+        candidate.score <
+        100
+    )
+
+
+  const best =
+    acceptable
+    ??
+    ranked[0]
+
+
   if (
-    visit.is_peak &&
-    visit.place_name
+    !best
   ) {
 
-    return visit.place_name
+    return null
 
   }
 
 
-  return null
-
-}
-
-
-// =====================================================
-// SCOR NUME VÂRF
-// =====================================================
-
-function getNameMatchScore(
-
-  candidateName: string,
-
-  requestedName: string
-
-) {
-
-  const candidate =
-    normalizePeakName(
-      candidateName
+  const latitude =
+    Number(
+      best.item.latitude
     )
 
 
-  const requested =
-    normalizePeakName(
-      requestedName
+  const longitude =
+    Number(
+      best.item.longitude
     )
 
 
   if (
-    candidate ===
-    requested
-  ) {
-
-    return 0
-
-  }
-
-
-  if (
-    candidate.includes(
-      requested
+    !Number.isFinite(
+      latitude
+    )
+    ||
+    !Number.isFinite(
+      longitude
     )
   ) {
 
-    return 1
+    return null
 
   }
 
 
-  if (
-    requested.includes(
-      candidate
-    )
-  ) {
-
-    return 2
-
-  }
-
-
-  const requestedWords =
-    requested.split(' ')
-
-
-  const candidateWords =
-    candidate.split(' ')
-
-
-  const commonWords =
-    requestedWords.filter(
-      (word) =>
-        candidateWords.includes(
-          word
-        )
+  let elevation =
+    parseElevation(
+      best.item.elevation
     )
 
 
+  let source:
+    ElevationSource =
+      'open-meteo-geocoding'
+
+
+  // ===================================================
+  // DACĂ NU AVEM ELEVAȚIE
+  // ===================================================
+
   if (
-    commonWords.length > 0
+    elevation ===
+    null
   ) {
 
-    return 5
+    elevation =
+      await getOpenMeteoElevation(
+        latitude,
+        longitude
+      )
+
+
+    if (
+      elevation !==
+      null
+    ) {
+
+      source =
+        'open-meteo-dem'
+
+    }
 
   }
 
 
-  return 100
+  return {
+    name:
+      best.item.name
+      ||
+      requestedName,
+
+    elevation,
+
+    latitude,
+
+    longitude,
+
+    source
+  }
 
 }
 
@@ -931,7 +1423,6 @@ async function findPeakWithNominatim(
 
     const params =
       new URLSearchParams({
-
         q:
           `Vârful ${cleanName}, România`,
 
@@ -955,17 +1446,12 @@ async function findPeakWithNominatim(
 
         'accept-language':
           'ro'
-
       })
-
-
-    const url =
-      `${NOMINATIM_SEARCH_URL}?${params.toString()}`
 
 
     const response =
       await fetchWithTimeout(
-        url
+        `${NOMINATIM_SEARCH_URL}?${params.toString()}`
       )
 
 
@@ -988,7 +1474,8 @@ async function findPeakWithNominatim(
         results
       )
       ||
-      results.length === 0
+      results.length ===
+      0
     ) {
 
       return null
@@ -997,26 +1484,19 @@ async function findPeakWithNominatim(
 
 
     const ranked =
-      [...results]
+      results
+
         .map(
           (item) => {
 
             const candidateName =
-
               item.name
-
               ||
-
-              item.namedetails
-                ?.name
-
+              item.namedetails?.name
               ||
-
               item.display_name
                 ?.split(',')[0]
-
               ||
-
               cleanName
 
 
@@ -1027,18 +1507,13 @@ async function findPeakWithNominatim(
               )
 
 
-            /*
-              natural=peak primește
-              prioritate foarte mare.
-            */
-
             if (
               item.type ===
               'peak'
             ) {
 
               score -=
-                20
+                50
 
             }
 
@@ -1049,19 +1524,15 @@ async function findPeakWithNominatim(
             ) {
 
               score -=
-                10
+                20
 
             }
 
 
             return {
-
               item,
-
               candidateName,
-
               score
-
             }
 
           }
@@ -1115,7 +1586,6 @@ async function findPeakWithNominatim(
 
 
     return {
-
       name:
         best.candidateName,
 
@@ -1128,8 +1598,10 @@ async function findPeakWithNominatim(
 
       latitude,
 
-      longitude
+      longitude,
 
+      source:
+        'nominatim'
     }
 
   }
@@ -1150,26 +1622,20 @@ async function findPeakWithNominatim(
 
 
 // =====================================================
-// OVERPASS - CĂUTARE ÎN JURUL UNOR COORDONATE
+// OVERPASS - CĂUTARE ÎN JURUL COORDONATELOR
 // =====================================================
 
 async function findPeakNearCoordinates(
-
   latitude: number,
-
   longitude: number,
-
   requestedName: string,
-
   radius =
     PEAK_NAME_COORDINATE_RADIUS
-
 ): Promise<PeakLookupResult | null> {
 
   try {
 
     const query = `
-
       [out:json][timeout:15];
 
       node(
@@ -1180,7 +1646,6 @@ async function findPeakNearCoordinates(
       ["natural"="peak"];
 
       out body;
-
     `
 
 
@@ -1191,7 +1656,8 @@ async function findPeakNearCoordinates(
 
 
     if (
-      peaks.length === 0
+      peaks.length ===
+      0
     ) {
 
       return null
@@ -1199,27 +1665,8 @@ async function findPeakNearCoordinates(
     }
 
 
-    const requested =
-      normalizePeakName(
-        requestedName
-      )
-
-
     const ranked =
       peaks
-
-        .filter(
-          (peak) =>
-
-            typeof peak.lat ===
-              'number'
-
-            &&
-
-            typeof peak.lon ===
-              'number'
-
-        )
 
         .map(
           (peak) => {
@@ -1232,53 +1679,33 @@ async function findPeakNearCoordinates(
 
             const distance =
               calculateDistance(
-
                 latitude,
-
                 longitude,
-
                 peak.lat,
-
                 peak.lon
-
               )
 
 
             const nameScore =
               getNameMatchScore(
                 name,
-                requested
+                requestedName
               )
-
-
-            /*
-              Numele are prioritate.
-
-              Distanța este folosită
-              doar pentru departajare.
-            */
-
-            const score =
-              (
-                nameScore *
-                100000
-              )
-              +
-              distance
 
 
             return {
-
               peak,
-
               name,
-
               distance,
-
               nameScore,
 
-              score
-
+              score:
+                (
+                  nameScore *
+                  100000
+                )
+                +
+                distance
             }
 
           }
@@ -1292,7 +1719,8 @@ async function findPeakNearCoordinates(
 
 
     if (
-      ranked.length === 0
+      ranked.length ===
+      0
     ) {
 
       return null
@@ -1300,60 +1728,90 @@ async function findPeakNearCoordinates(
     }
 
 
-    /*
-      Preferăm un nume care chiar
-      seamănă cu cel căutat.
-    */
-
-    const matchingPeak =
+    const matching =
       ranked.find(
         (candidate) =>
           candidate.nameScore <=
-          5
+          10
       )
 
 
     const best =
-      matchingPeak
+      matching
       ??
       ranked[0]
 
 
-    /*
-      Dacă numele nu seamănă deloc,
-      acceptăm doar dacă Nominatim
-      ne-a dus practic exact pe vârf.
-    */
-
     if (
-      best.nameScore >= 100
+      best.nameScore >=
+      100
       &&
-      best.distance > 800
+      best.distance >
+      800
     ) {
 
       return null
+
+    }
+
+
+    let elevation =
+      parseElevation(
+        best.peak
+          .tags
+          ?.ele
+      )
+
+
+    let source:
+      ElevationSource =
+        'osm'
+
+
+    /*
+      Dacă OSM găsește vârful,
+      dar ele lipsește,
+      folosim DEM-ul Open-Meteo.
+    */
+
+    if (
+      elevation ===
+      null
+    ) {
+
+      elevation =
+        await getOpenMeteoElevation(
+          best.peak.lat,
+          best.peak.lon
+        )
+
+
+      if (
+        elevation !==
+        null
+      ) {
+
+        source =
+          'open-meteo-dem'
+
+      }
 
     }
 
 
     return {
-
       name:
         best.name,
 
-      elevation:
-        parseElevation(
-          best.peak
-            .tags
-            ?.ele
-        ),
+      elevation,
 
       latitude:
         best.peak.lat,
 
       longitude:
-        best.peak.lon
+        best.peak.lon,
 
+      source
     }
 
   }
@@ -1361,7 +1819,7 @@ async function findPeakNearCoordinates(
   catch (error) {
 
     console.log(
-      'Peak around coordinates error:',
+      'Peak near coordinates error:',
       error
     )
 
@@ -1395,18 +1853,10 @@ async function findPeakByNameOverpass(
       )
 
 
-    /*
-      Bounding box aproximativ România:
-
-      sud, vest, nord, est
-    */
-
     const query = `
-
       [out:json][timeout:15];
 
       (
-
         node
           ["natural"="peak"]
           ["name"~"${safeName}",i]
@@ -1421,11 +1871,9 @@ async function findPeakByNameOverpass(
           ["natural"="peak"]
           ["alt_name"~"${safeName}",i]
           (43.5,20.0,48.5,30.0);
-
       );
 
       out body;
-
     `
 
 
@@ -1436,7 +1884,8 @@ async function findPeakByNameOverpass(
 
 
     if (
-      peaks.length === 0
+      peaks.length ===
+      0
     ) {
 
       return null
@@ -1448,29 +1897,22 @@ async function findPeakByNameOverpass(
       peaks
 
         .map(
-          (peak) => {
+          (peak) => ({
+            peak,
 
-            const name =
+            name:
               getPeakName(
                 peak
+              ),
+
+            score:
+              getNameMatchScore(
+                getPeakName(
+                  peak
+                ),
+                cleanName
               )
-
-
-            return {
-
-              peak,
-
-              name,
-
-              score:
-                getNameMatchScore(
-                  name,
-                  cleanName
-                )
-
-            }
-
-          }
+          })
         )
 
         .sort(
@@ -1491,24 +1933,57 @@ async function findPeakByNameOverpass(
     }
 
 
-    return {
+    let elevation =
+      parseElevation(
+        best.peak
+          .tags
+          ?.ele
+      )
 
+
+    let source:
+      ElevationSource =
+        'osm'
+
+
+    if (
+      elevation ===
+      null
+    ) {
+
+      elevation =
+        await getOpenMeteoElevation(
+          best.peak.lat,
+          best.peak.lon
+        )
+
+
+      if (
+        elevation !==
+        null
+      ) {
+
+        source =
+          'open-meteo-dem'
+
+      }
+
+    }
+
+
+    return {
       name:
         best.name,
 
-      elevation:
-        parseElevation(
-          best.peak
-            .tags
-            ?.ele
-        ),
+      elevation,
 
       latitude:
         best.peak.lat,
 
       longitude:
-        best.peak.lon
+        best.peak.lon,
 
+      source
     }
 
   }
@@ -1529,7 +2004,7 @@ async function findPeakByNameOverpass(
 
 
 // =====================================================
-// CĂUTARE COMPLETĂ A UNUI VÂRF DUPĂ NUME
+// CĂUTARE COMPLETĂ VÂRF DUPĂ NUME
 // =====================================================
 
 async function findPeakByName(
@@ -1567,141 +2042,168 @@ async function findPeakByName(
 
 
   // ===================================================
-  // 1. NOMINATIM
+  // 1. OPEN-METEO
   // ===================================================
 
-  const nominatimResult =
+  const openMeteo =
+    await findPeakWithOpenMeteo(
+      cleanName
+    )
+
+
+  if (
+    openMeteo &&
+    openMeteo.elevation !==
+    null
+  ) {
+
+    peakLookupCache.set(
+      cleanName,
+      openMeteo
+    )
+
+
+    return openMeteo
+
+  }
+
+
+  // ===================================================
+  // 2. DACĂ OPEN-METEO A GĂSIT COORDONATELE,
+  //    VERIFICĂM ȘI OSM ÎN JUR
+  // ===================================================
+
+  if (
+    openMeteo
+  ) {
+
+    const around =
+      await findPeakNearCoordinates(
+        openMeteo.latitude,
+        openMeteo.longitude,
+        cleanName
+      )
+
+
+    if (
+      around &&
+      around.elevation !==
+      null
+    ) {
+
+      peakLookupCache.set(
+        cleanName,
+        around
+      )
+
+
+      return around
+
+    }
+
+  }
+
+
+  // ===================================================
+  // 3. NOMINATIM
+  // ===================================================
+
+  const nominatim =
     await findPeakWithNominatim(
       cleanName
     )
 
 
   if (
-    nominatimResult
+    nominatim
   ) {
 
-    /*
-      Dacă Nominatim are deja
-      altitudine, suntem gata.
-    */
-
     if (
-      nominatimResult
-        .elevation !==
+      nominatim.elevation !==
       null
     ) {
 
       peakLookupCache.set(
         cleanName,
-        nominatimResult
+        nominatim
       )
 
 
-      return nominatimResult
+      return nominatim
 
     }
 
 
-    /*
-      Dacă nu are altitudine,
-      folosim coordonatele găsite
-      și căutăm natural=peak în jur.
-    */
-
-    const nearbyResult =
+    const around =
       await findPeakNearCoordinates(
-
-        nominatimResult.latitude,
-
-        nominatimResult.longitude,
-
+        nominatim.latitude,
+        nominatim.longitude,
         cleanName
-
       )
 
 
     if (
-      nearbyResult
+      around &&
+      around.elevation !==
+      null
     ) {
-
-      const finalResult = {
-
-        name:
-          nearbyResult.name,
-
-        elevation:
-          nearbyResult.elevation,
-
-        latitude:
-          nearbyResult.latitude,
-
-        longitude:
-          nearbyResult.longitude
-
-      }
-
 
       peakLookupCache.set(
         cleanName,
-        finalResult
+        around
       )
 
 
-      return finalResult
+      return around
 
     }
-
-
-    /*
-      Păstrăm totuși rezultatul
-      Nominatim dacă l-am găsit.
-    */
-
-    peakLookupCache.set(
-      cleanName,
-      nominatimResult
-    )
-
-
-    return nominatimResult
 
   }
 
 
   // ===================================================
-  // 2. FALLBACK OVERPASS DUPĂ NUME
+  // 4. OVERPASS DUPĂ NUME
   // ===================================================
 
-  const overpassResult =
+  const overpass =
     await findPeakByNameOverpass(
       cleanName
     )
 
 
   if (
-    overpassResult
+    overpass
   ) {
 
     peakLookupCache.set(
       cleanName,
-      overpassResult
+      overpass
     )
 
 
-    return overpassResult
+    return overpass
 
   }
 
 
-  /*
-    IMPORTANT:
+  // ===================================================
+  // 5. DACĂ OPEN-METEO A GĂSIT MĂCAR LOCAȚIA
+  // ===================================================
 
-    Nu salvăm "null" în cache.
+  if (
+    openMeteo
+  ) {
 
-    Dacă serviciile externe au avut
-    o problemă temporară, următoarea
-    întrebare va putea încerca din nou.
-  */
+    peakLookupCache.set(
+      cleanName,
+      openMeteo
+    )
+
+
+    return openMeteo
+
+  }
+
 
   return null
 
@@ -1733,17 +2235,13 @@ async function getPeaksNearVisits(
 
 
         return (
-
           Number.isFinite(
             latitude
           )
-
           &&
-
           Number.isFinite(
             longitude
           )
-
         )
 
       }
@@ -1751,17 +2249,14 @@ async function getPeaksNearVisits(
 
 
   if (
-    validVisits.length === 0
+    validVisits.length ===
+    0
   ) {
 
     return []
 
   }
 
-
-  /*
-    Nu trimitem un query foarte mare.
-  */
 
   const CHUNK_SIZE =
     10
@@ -1772,49 +2267,34 @@ async function getPeaksNearVisits(
 
 
   for (
-
     let index = 0;
-
-    index <
-    validVisits.length;
-
-    index +=
-    CHUNK_SIZE
-
+    index < validVisits.length;
+    index += CHUNK_SIZE
   ) {
 
     const chunk =
       validVisits.slice(
-
         index,
-
-        index +
-        CHUNK_SIZE
-
+        index + CHUNK_SIZE
       )
 
 
     const aroundQueries =
       chunk
-
         .map(
           (visit) => `
-
             node(
               around:${VISIT_PEAK_SEARCH_RADIUS},
               ${Number(visit.latitude)},
               ${Number(visit.longitude)}
             )
             ["natural"="peak"];
-
           `
         )
-
         .join('\n')
 
 
     const query = `
-
       [out:json][timeout:15];
 
       (
@@ -1822,7 +2302,6 @@ async function getPeaksNearVisits(
       );
 
       out body;
-
     `
 
 
@@ -1843,7 +2322,7 @@ async function getPeaksNearVisits(
     catch (error) {
 
       console.log(
-        'Nu am putut analiza acest grup de vizite:',
+        'Eroare analiză vizite:',
         error
       )
 
@@ -1851,10 +2330,6 @@ async function getPeaksNearVisits(
 
   }
 
-
-  // ===================================================
-  // ELIMINĂM DUPLICATE
-  // ===================================================
 
   const unique =
     new Map<
@@ -1892,7 +2367,8 @@ async function identifyVisitedPeaks(
 ): Promise<IdentifiedPeak[]> {
 
   if (
-    visits.length === 0
+    visits.length ===
+    0
   ) {
 
     return []
@@ -1916,7 +2392,7 @@ async function identifyVisitedPeaks(
   catch (error) {
 
     console.log(
-      'Eroare căutare vârfuri vizitate:',
+      'Eroare vârfuri vizitate:',
       error
     )
 
@@ -1961,22 +2437,14 @@ async function identifyVisitedPeaks(
 
     const visitText =
       normalizeText(
-
-        `${visit.place_name ?? ''} `
-
-        +
-
-        `${visit.location_details ?? ''} `
-
-        +
-
+        `${visit.place_name ?? ''} ` +
+        `${visit.location_details ?? ''} ` +
         `${visit.description ?? ''}`
-
       )
 
 
     // =================================================
-    // 1. DATE DEJA SALVATE
+    // 1. ALTITUDINE DEJA SALVATĂ
     // =================================================
 
     const savedElevation =
@@ -1986,13 +2454,12 @@ async function identifyVisitedPeaks(
 
 
     if (
-      savedElevation !== null
+      savedElevation !==
+      null
       &&
       (
         visit.is_peak
-
         ||
-
         visitText.includes(
           'vf'
         )
@@ -2006,7 +2473,6 @@ async function identifyVisitedPeaks(
 
 
       results.push({
-
         visitId:
           visit.id,
 
@@ -2028,7 +2494,6 @@ async function identifyVisitedPeaks(
 
         longitude:
           visitLongitude
-
       })
 
 
@@ -2038,11 +2503,12 @@ async function identifyVisitedPeaks(
 
 
     // =================================================
-    // 2. CĂUTARE DUPĂ COORDONATE
+    // 2. CĂUTĂM VÂRF APROPIAT
     // =================================================
 
     let bestPeak:
-      IdentifiedPeak | null = null
+      IdentifiedPeak | null =
+      null
 
 
     let bestScore =
@@ -2054,32 +2520,18 @@ async function identifyVisitedPeaks(
       of nearbyPeaks
     ) {
 
-      const elevation =
+      let elevation =
         parseElevation(
           peak.tags?.ele
         )
 
 
-      if (
-        elevation === null
-      ) {
-
-        continue
-
-      }
-
-
       const distance =
         calculateDistance(
-
           visitLatitude,
-
           visitLongitude,
-
           peak.lat,
-
           peak.lon
-
         )
 
 
@@ -2112,21 +2564,11 @@ async function identifyVisitedPeaks(
 
 
       const nameMatches =
-
-        normalizedPeakName.length >= 2
-
+        normalizedPeakName.length >=
+        2
         &&
-
-        (
-          visitPeakText.includes(
-            normalizedPeakName
-          )
-
-          ||
-
-          normalizedPeakName.includes(
-            visitPeakText
-          )
+        visitPeakText.includes(
+          normalizedPeakName
         )
 
 
@@ -2142,12 +2584,39 @@ async function identifyVisitedPeaks(
       }
 
 
+      /*
+        Dacă OSM nu are ele,
+        putem cere DEM doar pentru
+        un candidat relevant.
+      */
+
+      if (
+        elevation ===
+        null
+      ) {
+
+        elevation =
+          await getOpenMeteoElevation(
+            peak.lat,
+            peak.lon
+          )
+
+      }
+
+
+      if (
+        elevation ===
+        null
+      ) {
+
+        continue
+
+      }
+
+
       const score =
-
         nameMatches
-
           ? distance - 10000
-
           : distance
 
 
@@ -2161,7 +2630,6 @@ async function identifyVisitedPeaks(
 
 
         bestPeak = {
-
           visitId:
             visit.id,
 
@@ -2177,7 +2645,6 @@ async function identifyVisitedPeaks(
 
           longitude:
             peak.lon
-
         }
 
       }
@@ -2200,10 +2667,7 @@ async function identifyVisitedPeaks(
 
 
     // =================================================
-    // 3. FALLBACK DUPĂ NUMELE DIN LOCAȚIE
-    //
-    // Exemplu:
-    // "Traseu ... Vârful Omu ..."
+    // 3. NUMELE VÂRFULUI APARE ÎN LOCAȚIE
     // =================================================
 
     const extractedPeakName =
@@ -2225,31 +2689,19 @@ async function identifyVisitedPeaks(
 
 
         if (
-          externalPeak
-          &&
-          externalPeak.elevation !== null
+          externalPeak &&
+          externalPeak.elevation !==
+          null
         ) {
 
           const distance =
             calculateDistance(
-
               visitLatitude,
-
               visitLongitude,
-
               externalPeak.latitude,
-
               externalPeak.longitude
-
             )
 
-
-          /*
-            Pentru că numele vârfului
-            apare explicit în locația
-            utilizatorului, putem accepta
-            o distanță mai mare.
-          */
 
           if (
             distance <=
@@ -2257,7 +2709,6 @@ async function identifyVisitedPeaks(
           ) {
 
             results.push({
-
               visitId:
                 visit.id,
 
@@ -2274,7 +2725,6 @@ async function identifyVisitedPeaks(
 
               longitude:
                 externalPeak.longitude
-
             })
 
           }
@@ -2303,7 +2753,7 @@ async function identifyVisitedPeaks(
 
 
 // =====================================================
-// ELIMINĂM DUPLICATELE DE VÂRF
+// VÂRFURI UNICE
 // =====================================================
 
 function getUniquePeaks(
@@ -2333,12 +2783,6 @@ function getUniquePeaks(
         key
       )
 
-
-    /*
-      Dacă există două vizite la
-      același vârf, păstrăm informația
-      cu distanța cea mai mică.
-    */
 
     if (
       !existing
@@ -2371,7 +2815,6 @@ function getUniquePeaks(
 function ChatBot({
   visits
 }: ChatBotProps) {
-
 
   // ===================================================
   // STATE
@@ -2409,9 +2852,7 @@ function ChatBot({
     setMessages
   ] =
     useState<ChatMessage[]>([
-
       {
-
         id:
           1,
 
@@ -2426,18 +2867,17 @@ Pot căuta informații despre vârfuri și pot analiza locurile tale vizitate.
 Poți întreba:
 
 • Ce altitudine are Vârful Negoiu?
+• Ce altitudine are Moldoveanu?
 • Care este cel mai înalt vârf pe care l-am vizitat?
 • Ce vârfuri am vizitat?
 • Câte vârfuri am vizitat?
 • Am fost pe Vârful Omu?`
-
       }
-
     ])
 
 
   // ===================================================
-  // CACHE PENTRU VÂRFURILE VIZITATE
+  // CACHE VÂRFURI VIZITATE
   // ===================================================
 
   const visitedPeaksCacheRef =
@@ -2447,11 +2887,6 @@ Poți întreba:
       null
     )
 
-
-  /*
-    Dacă o analiză este deja în curs,
-    celelalte întrebări o pot refolosi.
-  */
 
   const visitedPeaksPromiseRef =
     useRef<
@@ -2498,10 +2933,8 @@ Poți întreba:
 
     messagesEndRef.current
       ?.scrollIntoView({
-
         behavior:
           'smooth'
-
       })
 
   }, [
@@ -2512,15 +2945,10 @@ Poți întreba:
 
 
   // ===================================================
-  // OBȚINEM VÂRFURILE VIZITATE CU CACHE
+  // ANALIZĂ VÂRFURI CU CACHE
   // ===================================================
 
   async function getVisitedPeaksCached() {
-
-    /*
-      Dacă am calculat deja rezultatul,
-      îl folosim instant.
-    */
 
     if (
       visitedPeaksCacheRef.current
@@ -2532,11 +2960,6 @@ Poți întreba:
 
     }
 
-
-    /*
-      Dacă analiza este deja în curs,
-      așteptăm aceeași promisiune.
-    */
 
     if (
       visitedPeaksPromiseRef.current
@@ -2563,15 +2986,6 @@ Poți întreba:
       const result =
         await promise
 
-
-      /*
-        Cache-uim rezultatul doar dacă
-        am găsit ceva.
-
-        Dacă serviciile externe au avut
-        o problemă și rezultatul este gol,
-        permitem o nouă încercare ulterior.
-      */
 
       if (
         result.length >
@@ -2630,9 +3044,10 @@ Poți întreba:
     if (!peak) {
 
       return (
-`Nu am reușit să găsesc vârful „${peakName}” în sursele externe disponibile.
+`❌ Nu am reușit să găsesc „${peakName}” în sursele externe.
 
-Poți încerca din nou peste câteva secunde.`
+Încearcă și forma simplă, de exemplu:
+„Ce altitudine are Negoiu?”`
       )
 
     }
@@ -2644,7 +3059,21 @@ Poți încerca din nou peste câteva secunde.`
     ) {
 
       return (
-`🏔️ Am găsit ${peak.name}, dar sursa externă nu mi-a oferit altitudinea acestui vârf.`
+`🏔️ Am găsit ${peak.name}, dar nu am reușit să determin altitudinea.`
+      )
+
+    }
+
+
+    if (
+      peak.source ===
+      'open-meteo-dem'
+    ) {
+
+      return (
+`🏔️ ${peak.name}
+
+Altitudine aproximativă: ${peak.elevation} m`
       )
 
     }
@@ -2653,7 +3082,7 @@ Poți încerca din nou peste câteva secunde.`
     return (
 `🏔️ ${peak.name}
 
-Altitudine: ${peak.elevation} m.`
+Altitudine: ${peak.elevation} m`
     )
 
   }
@@ -2666,7 +3095,8 @@ Altitudine: ${peak.elevation} m.`
   async function answerHighestVisitedPeak() {
 
     if (
-      visits.length === 0
+      visits.length ===
+      0
     ) {
 
       return (
@@ -2681,13 +3111,14 @@ Altitudine: ${peak.elevation} m.`
 
 
     if (
-      identified.length === 0
+      identified.length ===
+      0
     ) {
 
       return (
 `Nu am reușit momentan să identific un vârf cu altitudine dintre locațiile tale.
 
-Poți încerca din nou peste câteva secunde.`
+Încearcă din nou peste câteva secunde.`
       )
 
     }
@@ -2701,7 +3132,6 @@ Poți încerca din nou peste câteva secunde.`
 
     const highest =
       [...uniquePeaks]
-
         .sort(
           (a, b) =>
             b.elevation -
@@ -2727,7 +3157,8 @@ Altitudine: ${highest.elevation} m`
   async function answerVisitedPeaks() {
 
     if (
-      visits.length === 0
+      visits.length ===
+      0
     ) {
 
       return (
@@ -2742,14 +3173,9 @@ Altitudine: ${highest.elevation} m`
 
 
     if (
-      identified.length === 0
+      identified.length ===
+      0
     ) {
-
-      /*
-        Fallback vizual:
-        arătăm locațiile unde textul
-        conține "vârf".
-      */
 
       const possiblePeaks =
         visits.filter(
@@ -2757,26 +3183,17 @@ Altitudine: ${highest.elevation} m`
 
             const text =
               normalizeText(
-
-                `${visit.place_name ?? ''} `
-
-                +
-
+                `${visit.place_name ?? ''} ` +
                 `${visit.location_details ?? ''}`
-
               )
 
 
             return (
-
               visit.is_peak
-
               ||
-
               text.includes(
                 'vf'
               )
-
             )
 
           }
@@ -2784,7 +3201,8 @@ Altitudine: ${highest.elevation} m`
 
 
       if (
-        possiblePeaks.length === 0
+        possiblePeaks.length ===
+        0
       ) {
 
         return (
@@ -2796,10 +3214,8 @@ Altitudine: ${highest.elevation} m`
 
       const list =
         possiblePeaks
-
           .map(
             (visit, index) =>
-
               `${index + 1}. ${
                 visit.place_name
                 ||
@@ -2808,7 +3224,6 @@ Altitudine: ${highest.elevation} m`
                 'Locație montană'
               }`
           )
-
           .join('\n')
 
 
@@ -2836,13 +3251,10 @@ ${list}`
 
     const list =
       uniquePeaks
-
         .map(
           (peak, index) =>
-
             `${index + 1}. ${peak.name} — ${peak.elevation} m`
         )
-
         .join('\n')
 
 
@@ -2881,7 +3293,8 @@ ${list}`
 
 
       if (
-        count === 1
+        count ===
+        1
       ) {
 
         return (
@@ -2904,26 +3317,17 @@ ${list}`
 
           const text =
             normalizeText(
-
-              `${visit.place_name ?? ''} `
-
-              +
-
+              `${visit.place_name ?? ''} ` +
               `${visit.location_details ?? ''}`
-
             )
 
 
           return (
-
             visit.is_peak
-
             ||
-
             text.includes(
               'vf'
             )
-
           )
 
         }
@@ -2931,7 +3335,8 @@ ${list}`
 
 
     if (
-      possiblePeaks.length === 0
+      possiblePeaks.length ===
+      0
     ) {
 
       return (
@@ -2978,7 +3383,7 @@ ${list}`
 
 
     // =================================================
-    // 1. CĂUTĂM DIRECT ÎN SUPABASE
+    // CĂUTARE DIRECT ÎN SUPABASE
     // =================================================
 
     const directVisit =
@@ -2987,17 +3392,9 @@ ${list}`
 
           const visitText =
             normalizeText(
-
-              `${visit.place_name ?? ''} `
-
-              +
-
-              `${visit.location_details ?? ''} `
-
-              +
-
+              `${visit.place_name ?? ''} ` +
+              `${visit.location_details ?? ''} ` +
               `${visit.description ?? ''}`
-
             )
 
 
@@ -3025,7 +3422,7 @@ Am găsit această locație în vizitele tale:
 
 
     // =================================================
-    // 2. VERIFICĂM VÂRFURILE IDENTIFICATE
+    // VÂRFURI IDENTIFICATE EXTERN
     // =================================================
 
     const identified =
@@ -3043,17 +3440,13 @@ Am găsit această locație în vizitele tale:
 
 
           return (
-
             name.includes(
               normalizedName
             )
-
             ||
-
             normalizedName.includes(
               name
             )
-
           )
 
         }
@@ -3085,7 +3478,7 @@ Altitudine: ${externalMatch.elevation} m`
 
 
   // ===================================================
-  // INTERPRETAREA ÎNTREBĂRII
+  // INTERPRETARE ÎNTREBARE
   // ===================================================
 
   async function generateAnswer(
@@ -3099,61 +3492,45 @@ Altitudine: ${externalMatch.elevation} m`
 
 
     // =================================================
-    // CEL MAI ÎNALT VÂRF VIZITAT
+    // CEL MAI ÎNALT
     // =================================================
 
     if (
-
       (
         normalized.includes(
           'cel mai inalt'
         )
-
         ||
-
         normalized.includes(
           'cea mai mare altitudine'
         )
-
         ||
-
         normalized.includes(
           'cea mai inalta'
         )
       )
-
       &&
-
       (
         normalized.includes(
           'vizitat'
         )
-
         ||
-
         normalized.includes(
           'am fost'
         )
-
         ||
-
         normalized.includes(
           'meu'
         )
-
         ||
-
         normalized.includes(
           'mele'
         )
-
         ||
-
         normalized.includes(
           'mine'
         )
       )
-
     ) {
 
       return await
@@ -3163,43 +3540,33 @@ Altitudine: ${externalMatch.elevation} m`
 
 
     // =================================================
-    // CÂTE VÂRFURI AM VIZITAT
+    // CÂTE VÂRFURI
     // =================================================
 
     if (
-
       (
         normalized.includes(
           'cate vf'
         )
-
         ||
-
         normalized.includes(
           'cati vf'
         )
-
         ||
-
         normalized.startsWith(
           'cate vf'
         )
       )
-
       &&
-
       (
         normalized.includes(
           'vizitat'
         )
-
         ||
-
         normalized.includes(
           'am fost'
         )
       )
-
     ) {
 
       return await
@@ -3209,37 +3576,29 @@ Altitudine: ${externalMatch.elevation} m`
 
 
     // =================================================
-    // CE VÂRFURI AM VIZITAT
+    // CE VÂRFURI
     // =================================================
 
     if (
-
       (
         normalized.includes(
           'ce vf'
         )
-
         ||
-
         normalized.includes(
           'care vf'
         )
       )
-
       &&
-
       (
         normalized.includes(
           'vizitat'
         )
-
         ||
-
         normalized.includes(
           'am fost'
         )
       )
-
     ) {
 
       return await
@@ -3253,23 +3612,17 @@ Altitudine: ${externalMatch.elevation} m`
     // =================================================
 
     if (
-
       normalized.startsWith(
         'am fost'
       )
-
       ||
-
       normalized.startsWith(
         'am vizitat'
       )
-
       ||
-
       normalized.includes(
         'am fost pe'
       )
-
     ) {
 
       return await
@@ -3281,27 +3634,21 @@ Altitudine: ${externalMatch.elevation} m`
 
 
     // =================================================
-    // ALTITUDINE VÂRF EXTERN
+    // ALTITUDINE EXTERNĂ
     // =================================================
 
     if (
-
       normalized.includes(
         'altitudine'
       )
-
       ||
-
       normalized.includes(
         'inaltime'
       )
-
       ||
-
       normalized.includes(
         'inalt'
       )
-
     ) {
 
       return await
@@ -3320,6 +3667,8 @@ Altitudine: ${externalMatch.elevation} m`
 `Momentan pot răspunde la întrebări precum:
 
 🏔️ Ce altitudine are Vârful Negoiu?
+
+🏔️ Ce altitudine are Moldoveanu?
 
 🏆 Care este cel mai înalt vârf pe care l-am vizitat?
 
@@ -3361,7 +3710,6 @@ Altitudine: ${externalMatch.elevation} m`
 
     const userMessage:
       ChatMessage = {
-
       id:
         Date.now(),
 
@@ -3370,17 +3718,13 @@ Altitudine: ${externalMatch.elevation} m`
 
       text:
         question
-
     }
 
 
     setMessages(
       (current) => [
-
         ...current,
-
         userMessage
-
       ]
     )
 
@@ -3405,11 +3749,9 @@ Altitudine: ${externalMatch.elevation} m`
 
       setMessages(
         (current) => [
-
           ...current,
 
           {
-
             id:
               Date.now() + 1,
 
@@ -3418,9 +3760,7 @@ Altitudine: ${externalMatch.elevation} m`
 
             text:
               answer
-
           }
-
         ]
       )
 
@@ -3436,11 +3776,9 @@ Altitudine: ${externalMatch.elevation} m`
 
       setMessages(
         (current) => [
-
           ...current,
 
           {
-
             id:
               Date.now() + 1,
 
@@ -3451,9 +3789,7 @@ Altitudine: ${externalMatch.elevation} m`
 `❌ Nu am reușit să obțin informațiile externe momentan.
 
 Încearcă din nou peste câteva secunde.`
-
           }
-
         ]
       )
 
@@ -3478,240 +3814,189 @@ Altitudine: ${externalMatch.elevation} m`
 
     <>
 
-      {
-        open
-        &&
-        (
+      {open && (
 
-          <section
-            className="peakquest-chat"
-            aria-label="PeakQuest Bot"
-          >
+        <section
+          className="peakquest-chat"
+          aria-label="PeakQuest Bot"
+        >
 
+          {/* =================================================
+              HEADER
+          ================================================= */}
 
-            {/* ===========================================
-                HEADER
-            =========================================== */}
+          <div className="chat-header">
 
-            <div className="chat-header">
+            <div className="chat-header-left">
 
-
-              <div className="chat-header-left">
-
-
-                <div className="chat-avatar">
-
-                  🏔️
-
-                </div>
-
-
-                <div>
-
-                  <div className="chat-title">
-
-                    PeakQuest Bot
-
-                  </div>
-
-
-                  <div className="chat-subtitle">
-
-                    Asistent montan
-
-                  </div>
-
-                </div>
-
-
+              <div className="chat-avatar">
+                🏔️
               </div>
 
 
-              <button
+              <div>
 
-                className="chat-close"
+                <div className="chat-title">
+                  PeakQuest Bot
+                </div>
 
-                type="button"
 
-                title="Închide chat-ul"
+                <div className="chat-subtitle">
+                  Asistent montan
+                </div>
 
-                onClick={() =>
-                  setOpen(
-                    false
-                  )
-                }
-
-              >
-
-                ×
-
-              </button>
-
+              </div>
 
             </div>
 
 
-            {/* ===========================================
-                MESAJE
-            =========================================== */}
+            <button
+              className="chat-close"
+              type="button"
+              title="Închide chat-ul"
 
-            <div className="chat-messages">
-
-
-              {
-                messages.map(
-                  (message) => (
-
-                    <div
-
-                      key={
-                        message.id
-                      }
-
-                      className={
-                        message.role ===
-                        'user'
-
-                          ? 'chat-message-row user'
-
-                          : 'chat-message-row bot'
-                      }
-
-                    >
-
-
-                      <div
-
-                        className={
-                          message.role ===
-                          'user'
-
-                            ? 'chat-message user'
-
-                            : 'chat-message bot'
-                        }
-
-                      >
-
-                        {
-                          message.text
-                        }
-
-                      </div>
-
-
-                    </div>
-
-                  )
+              onClick={() =>
+                setOpen(
+                  false
                 )
               }
+            >
+
+              ×
+
+            </button>
+
+          </div>
 
 
-              {/* =========================================
-                  LOADING
-              ========================================= */}
+          {/* =================================================
+              MESAJE
+          ================================================= */}
 
-              {
-                loading
-                &&
-                (
+          <div className="chat-messages">
+
+            {messages.map(
+              (message) => (
+
+                <div
+                  key={
+                    message.id
+                  }
+
+                  className={
+                    message.role ===
+                    'user'
+                      ? 'chat-message-row user'
+                      : 'chat-message-row bot'
+                  }
+                >
 
                   <div
-                    className="chat-message-row bot"
+                    className={
+                      message.role ===
+                      'user'
+                        ? 'chat-message user'
+                        : 'chat-message bot'
+                    }
                   >
 
-                    <div
-                      className="chat-message bot loading"
-                    >
-
-                      <span />
-
-                      <span />
-
-                      <span />
-
-                    </div>
+                    {message.text}
 
                   </div>
 
-                )
-              }
+                </div>
 
+              )
+            )}
+
+
+            {/* =================================================
+                LOADING
+            ================================================= */}
+
+            {loading && (
 
               <div
-                ref={
-                  messagesEndRef
-                }
-              />
-
-
-            </div>
-
-
-            {/* ===========================================
-                INPUT
-            =========================================== */}
-
-            <form
-
-              className="chat-input-area"
-
-              onSubmit={
-                sendMessage
-              }
-
-            >
-
-
-              <input
-
-                type="text"
-
-                value={
-                  input
-                }
-
-                disabled={
-                  loading
-                }
-
-                placeholder="Întreabă ceva..."
-
-                onChange={(e) =>
-                  setInput(
-                    e.target.value
-                  )
-                }
-
-              />
-
-
-              <button
-
-                type="submit"
-
-                title="Trimite"
-
-                disabled={
-                  loading
-                  ||
-                  !input.trim()
-                }
-
+                className="chat-message-row bot"
               >
 
-                ➤
+                <div
+                  className="chat-message bot loading"
+                >
 
-              </button>
+                  <span />
+                  <span />
+                  <span />
+
+                </div>
+
+              </div>
+
+            )}
 
 
-            </form>
+            <div
+              ref={
+                messagesEndRef
+              }
+            />
+
+          </div>
 
 
-          </section>
+          {/* =================================================
+              INPUT
+          ================================================= */}
 
-        )
-      }
+          <form
+            className="chat-input-area"
+
+            onSubmit={
+              sendMessage
+            }
+          >
+
+            <input
+              type="text"
+
+              value={
+                input
+              }
+
+              disabled={
+                loading
+              }
+
+              placeholder="Întreabă ceva..."
+
+              onChange={(e) =>
+                setInput(
+                  e.target.value
+                )
+              }
+            />
+
+
+            <button
+              type="submit"
+
+              title="Trimite"
+
+              disabled={
+                loading ||
+                !input.trim()
+              }
+            >
+
+              ➤
+
+            </button>
+
+          </form>
+
+        </section>
+
+      )}
 
 
       {/* =================================================
@@ -3719,7 +4004,6 @@ Altitudine: ${externalMatch.elevation} m`
       ================================================= */}
 
       <button
-
         className={
           open
             ? 'peakquest-chat-toggle open'
@@ -3735,17 +4019,14 @@ Altitudine: ${externalMatch.elevation} m`
             !open
           )
         }
-
       >
 
-        {
-          open
-            ? '×'
-            : '💬'
+        {open
+          ? '×'
+          : '💬'
         }
 
       </button>
-
 
     </>
 
