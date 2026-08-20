@@ -31,6 +31,9 @@ type Visit = {
 
   peak_elevation?: number | null
   mountain_range?: string | null
+
+  visit_date?: string | null
+  created_at?: string | null
 }
 
 
@@ -4589,19 +4592,20 @@ function ChatBot({
         text:
 `Salut! 👋 Sunt PeakQuest Bot.
 
-Pot căuta informații despre vârfuri și pot analiza locurile tale vizitate.
+Sunt asistentul tău montan. Pot răspunde atât despre istoricul tău PeakQuest, cât și la întrebări generale despre munți și drumeții.
 
-Poți întreba:
+De exemplu:
 
+• În ce masiv se află Vârful Păpușa?
 • Ce altitudine are Vârful Negoiu?
-• În ce masiv se află Vârful Omu?
-• Ce altitudine are Vârful Greci din Munții Măcin?
-• Unde se află Moldoveanu?
-• Ce coordonate are Vârful Omu?
-• Care este cel mai înalt vârf din Munții Bucegi?
-• Care este cel mai înalt vârf din România?
+• Care este mai înalt: Negoiu sau Moldoveanu?
 • Ce vârfuri din Făgăraș am vizitat?
-• Care este cel mai înalt vârf pe care l-am vizitat?`
+• Care a fost prima mea drumeție?
+• În ce lună am vizitat cele mai multe vârfuri?
+• Ce echipament este util pentru o drumeție de o zi?
+• Ce ar trebui să verific înainte să plec pe munte?
+
+Poți formula întrebarea natural, nu trebuie să folosești o expresie exactă.`
 
       }
 
@@ -5980,6 +5984,228 @@ ${list}`
 
 
   // ===================================================
+  // CONTEXT PENTRU AI
+  // ===================================================
+  //
+  // Trimitem doar informațiile utile pentru conversație.
+  // NU trimitem user_id, email, image_path sau alte date
+  // care nu sunt necesare pentru răspuns.
+  // ===================================================
+
+  function buildAIVisitsContext() {
+
+    return visits.map(
+      (visit) => ({
+
+        place_name:
+          visit.place_name
+          ??
+          null,
+
+        location_details:
+          visit.location_details
+          ??
+          null,
+
+        description:
+          visit.description
+          ??
+          null,
+
+        is_peak:
+          Boolean(
+            visit.is_peak
+          ),
+
+        peak_elevation:
+          visit.peak_elevation
+          ??
+          null,
+
+        mountain_range:
+          visit.mountain_range
+          ??
+          null,
+
+        visit_date:
+          visit.visit_date
+          ??
+          null,
+
+        latitude:
+          Number.isFinite(
+            Number(
+              visit.latitude
+            )
+          )
+            ? Number(
+                visit.latitude
+              )
+            : null,
+
+        longitude:
+          Number.isFinite(
+            Number(
+              visit.longitude
+            )
+          )
+            ? Number(
+                visit.longitude
+              )
+            : null
+
+      })
+    )
+
+  }
+
+
+  function buildAIConversationContext() {
+
+    return messages
+
+      /*
+        Nu este nevoie să trimitem toată conversația.
+        Ultimele mesaje sunt suficiente pentru follow-up-uri
+        de tipul:
+        "Dar acesta?"
+        "Și în ce masiv este?"
+      */
+
+      .slice(
+        -10
+      )
+
+      .map(
+        (message) => ({
+
+          role:
+            message.role,
+
+          text:
+            message.text
+
+        })
+      )
+
+  }
+
+
+  // ===================================================
+  // GEMINI - RĂSPUNS LIBER
+  // ===================================================
+  //
+  // Această funcție este folosită pentru întrebările pe
+  // care sistemul vechi nu le acoperă printr-o intenție
+  // specializată.
+  //
+  // Edge Function-ul nou trebuie să accepte:
+  //
+  // mode: "answer"
+  // question
+  // visits
+  // conversation
+  //
+  // și să întoarcă:
+  //
+  // { answer: "..." }
+  //
+  // Dacă Edge Function-ul este încă versiunea veche,
+  // funcția întoarce null și botul continuă să funcționeze
+  // prin sistemul existent.
+  // ===================================================
+
+  async function answerFreelyWithAI(
+    question: string
+  ): Promise<string | null> {
+
+    try {
+
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .functions
+          .invoke(
+            'peakquest-ai',
+            {
+              body: {
+
+                mode:
+                  'answer',
+
+                question,
+
+                visits:
+                  buildAIVisitsContext(),
+
+                conversation:
+                  buildAIConversationContext(),
+
+                lastPeakName:
+                  lastPeakNameRef.current,
+
+                lastIntent:
+                  lastIntentRef.current
+
+              }
+            }
+          )
+
+
+      if (
+        error
+      ) {
+
+        console.error(
+          'PeakQuest AI direct answer:',
+          error
+        )
+
+
+        return null
+
+      }
+
+
+      const answer =
+        data
+          ?.answer
+
+
+      if (
+        typeof answer !==
+        'string'
+        ||
+        !answer.trim()
+      ) {
+
+        return null
+
+      }
+
+
+      return answer.trim()
+
+    }
+
+    catch (error) {
+
+      console.error(
+        'PeakQuest AI direct answer:',
+        error
+      )
+
+
+      return null
+
+    }
+
+  }
+
+
+  // ===================================================
   // GEMINI - INTERPRETAREA ÎNTREBĂRII
   // ===================================================
 
@@ -7324,6 +7550,33 @@ Au aceeași altitudine în datele disponibile.`
       sau AI-ul nu recunoaște întrebarea,
       chatbotul rămâne funcțional cu
       sistemul vechi bazat pe reguli.
+    */
+
+    /*
+      Chiar dacă interpretarea pe intenții nu a funcționat,
+      încercăm încă o dată varianta conversațională.
+      Asta permite Edge Function-ului nou să răspundă la
+      întrebări care nu există în lista AIIntent.
+    */
+
+    const directAnswer =
+      await answerFreelyWithAI(
+        question
+      )
+
+
+    if (
+      directAnswer
+    ) {
+
+      return directAnswer
+
+    }
+
+
+    /*
+      Ultima plasă de siguranță:
+      vechiul motor bazat pe reguli.
     */
 
     return await

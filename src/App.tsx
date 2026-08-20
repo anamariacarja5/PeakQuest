@@ -6746,6 +6746,102 @@ Scrie o descriere pentru acest loc:`
 
 
   // ===================================================
+  // COMPLETARE PROFIL PENTRU CONTURILE VECHI
+  // ===================================================
+
+  async function completeProfile() {
+
+    const firstName =
+      window.prompt(
+        'Introdu prenumele:'
+      )
+
+
+    if (
+      firstName === null ||
+      !firstName.trim()
+    ) {
+
+      return
+
+    }
+
+
+    const lastName =
+      window.prompt(
+        'Introdu numele de familie:'
+      )
+
+
+    if (
+      lastName === null ||
+      !lastName.trim()
+    ) {
+
+      return
+
+    }
+
+
+    const {
+      data,
+      error
+    } =
+      await supabase.auth
+        .updateUser({
+
+          data: {
+
+            first_name:
+              firstName.trim(),
+
+            last_name:
+              lastName.trim(),
+
+            full_name:
+              `${firstName.trim()} ${lastName.trim()}`
+
+          }
+
+        })
+
+
+    if (error) {
+
+      console.log(
+        'Eroare actualizare profil:',
+        error
+      )
+
+
+      alert(
+        'Numele nu a putut fi salvat.'
+      )
+
+
+      return
+
+    }
+
+
+    setUser(
+      data.user
+    )
+
+
+    setProfileOpen(
+      false
+    )
+
+
+    alert(
+      'Profilul a fost actualizat!'
+    )
+
+  }
+
+
+  // ===================================================
   // LOGOUT
   // ===================================================
 
@@ -6803,6 +6899,12 @@ Scrie o descriere pentru acest loc:`
     )
 
   }
+
+
+  const displayName =
+    user.user_metadata?.full_name
+    ||
+    user.email
 
 
   // ===================================================
@@ -7114,7 +7216,7 @@ Scrie o descriere pentru acest loc:`
 
             <span className="user-email">
 
-              👤 Logat ca: {user.email}
+              👤 Logat ca: {displayName}
 
             </span>
 
@@ -7161,6 +7263,32 @@ Scrie o descriere pentru acest loc:`
             (
 
               <div className="user-dropdown">
+
+
+                {
+                  !user.user_metadata?.full_name
+                  &&
+                  (
+
+                    <button
+
+                      className="logout-button"
+
+                      type="button"
+
+                      onClick={
+                        completeProfile
+                      }
+
+                    >
+
+                      👤 Completează profilul
+
+                    </button>
+
+                  )
+                }
+
 
                 <button
 

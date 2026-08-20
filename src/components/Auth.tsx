@@ -6,26 +6,19 @@ import './Auth.css'
 
 function Auth() {
 
-  const [email, setEmail] =
-    useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
 
-  const [password, setPassword] =
-    useState('')
+  // NOU
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [registerMode, setRegisterMode] = useState(false)
 
-  const [confirmPassword, setConfirmPassword] =
-    useState('')
-
-  const [loading, setLoading] =
-    useState(false)
-
-  const [message, setMessage] =
-    useState('')
-
-  const [errorMessage, setErrorMessage] =
-    useState('')
-
-  const [resetMode, setResetMode] =
-    useState(false)
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
+  const [resetMode, setResetMode] = useState(false)
 
 
   // =====================================================
@@ -38,30 +31,25 @@ function Auth() {
       data: {
         subscription
       }
-    } =
-      supabase.auth.onAuthStateChange(
-        (event) => {
+    } = supabase.auth.onAuthStateChange(
+      (event) => {
 
-          if (
-            event === 'PASSWORD_RECOVERY'
-          ) {
+        if (event === 'PASSWORD_RECOVERY') {
 
-            setResetMode(true)
+          setResetMode(true)
 
-            setMessage(
-              'Introdu parola nouă.'
-            )
-
-          }
+          setMessage(
+            'Introdu parola nouă.'
+          )
 
         }
-      )
+
+      }
+    )
 
 
     return () => {
-
       subscription.unsubscribe()
-
     }
 
   }, [])
@@ -111,11 +99,8 @@ function Auth() {
       await supabase.auth
         .signInWithPassword({
 
-          email:
-            email.trim(),
-
-          password:
-            password
+          email: email.trim(),
+          password: password
 
         })
 
@@ -142,6 +127,21 @@ function Auth() {
   async function register() {
 
     clearMessages()
+
+
+    // verificăm numele și prenumele
+    if (
+      !firstName.trim() ||
+      !lastName.trim()
+    ) {
+
+      setErrorMessage(
+        'Completează numele și prenumele.'
+      )
+
+      return
+
+    }
 
 
     if (
@@ -178,11 +178,26 @@ function Auth() {
       await supabase.auth
         .signUp({
 
-          email:
-            email.trim(),
+          email: email.trim(),
 
-          password:
-            password
+          password: password,
+
+          options: {
+
+            data: {
+
+              first_name:
+                firstName.trim(),
+
+              last_name:
+                lastName.trim(),
+
+              full_name:
+                `${firstName.trim()} ${lastName.trim()}`
+
+            }
+
+          }
 
         })
 
@@ -289,8 +304,7 @@ function Auth() {
 
 
     if (
-      password !==
-      confirmPassword
+      password !== confirmPassword
     ) {
 
       setErrorMessage(
@@ -322,8 +336,7 @@ function Auth() {
       await supabase.auth
         .updateUser({
 
-          password:
-            password
+          password: password
 
         })
 
@@ -391,9 +404,7 @@ function Auth() {
 
               <input
                 id="new-password"
-
                 type="password"
-
                 value={password}
 
                 onChange={(e) =>
@@ -415,9 +426,7 @@ function Auth() {
 
               <input
                 id="confirm-password"
-
                 type="password"
-
                 value={confirmPassword}
 
                 onChange={(e) =>
@@ -450,14 +459,9 @@ function Auth() {
 
             <button
               className="auth-login-button"
-
               type="button"
-
               disabled={loading}
-
-              onClick={
-                saveNewPassword
-              }
+              onClick={saveNewPassword}
             >
 
               {loading
@@ -486,16 +490,19 @@ function Auth() {
 
   return (
 
-    <div  className="auth-page"
-          style={{
-            backgroundImage: `
-              linear-gradient(
-                rgba(8, 13, 23, 0.20),
-                rgba(8, 12, 20, 0.35)
-              ),
-              url(${authBg})
-            `
-      }}>
+    <div
+      className="auth-page"
+
+      style={{
+        backgroundImage: `
+          linear-gradient(
+            rgba(8, 13, 23, 0.20),
+            rgba(8, 12, 20, 0.35)
+          ),
+          url(${authBg})
+        `
+      }}
+    >
 
 
       <div className="auth-content">
@@ -519,7 +526,10 @@ function Auth() {
 
         <h1 className="auth-title">
 
-          Login / Register
+          {registerMode
+            ? 'Create Account'
+            : 'Login'
+          }
 
         </h1>
 
@@ -528,6 +538,68 @@ function Auth() {
         {/* CARD */}
 
         <div className="auth-card">
+
+
+          {/* NUME - DOAR LA REGISTER */}
+
+          {registerMode && (
+
+            <div className="auth-field">
+
+              <label htmlFor="last-name">
+                Nume
+              </label>
+
+              <input
+                id="last-name"
+                type="text"
+
+                value={lastName}
+
+                onChange={(e) =>
+                  setLastName(
+                    e.target.value
+                  )
+                }
+
+                autoComplete="family-name"
+              />
+
+            </div>
+
+          )}
+
+
+
+          {/* PRENUME - DOAR LA REGISTER */}
+
+          {registerMode && (
+
+            <div className="auth-field">
+
+              <label htmlFor="first-name">
+                Prenume
+              </label>
+
+              <input
+                id="first-name"
+                type="text"
+
+                value={firstName}
+
+                onChange={(e) =>
+                  setFirstName(
+                    e.target.value
+                  )
+                }
+
+                autoComplete="given-name"
+              />
+
+            </div>
+
+          )}
+
 
 
           {/* EMAIL */}
@@ -541,9 +613,7 @@ function Auth() {
 
             <input
               id="email"
-
               type="email"
-
               value={email}
 
               onChange={(e) =>
@@ -570,9 +640,7 @@ function Auth() {
 
             <input
               id="password"
-
               type="password"
-
               value={password}
 
               onChange={(e) =>
@@ -581,7 +649,11 @@ function Auth() {
                 )
               }
 
-              autoComplete="current-password"
+              autoComplete={
+                registerMode
+                  ? 'new-password'
+                  : 'current-password'
+              }
             />
 
           </div>
@@ -593,9 +665,7 @@ function Auth() {
           {message && (
 
             <div className="auth-message success">
-
               {message}
-
             </div>
 
           )}
@@ -607,71 +677,112 @@ function Auth() {
           {errorMessage && (
 
             <div className="auth-message error">
-
               {errorMessage}
-
             </div>
 
           )}
 
 
 
-          {/* LOGIN */}
+          {/* MOD LOGIN */}
 
-          <button
-            className="auth-login-button"
+          {!registerMode && (
 
-            type="button"
+            <>
 
-            disabled={loading}
+              <button
+                className="auth-login-button"
+                type="button"
+                disabled={loading}
+                onClick={login}
+              >
 
-            onClick={login}
-          >
+                {loading
+                  ? 'Please wait...'
+                  : 'Login'
+                }
 
-            {loading
-              ? 'Please wait...'
-              : 'Login'
-            }
-
-          </button>
-
-
-
-          {/* REGISTER */}
-
-          <button
-            className="auth-register-button"
-
-            type="button"
-
-            disabled={loading}
-
-            onClick={register}
-          >
-
-            Register
-
-          </button>
+              </button>
 
 
+              <button
+                className="auth-register-button"
+                type="button"
+                disabled={loading}
 
-          {/* FORGOT PASSWORD */}
+                onClick={() => {
 
-          <button
-            className="auth-forgot-button"
+                  clearMessages()
 
-            type="button"
+                  setRegisterMode(true)
 
-            disabled={loading}
+                }}
+              >
 
-            onClick={
-              forgotPassword
-            }
-          >
+                Register
 
-            Am uitat parola
+              </button>
 
-          </button>
+
+              <button
+                className="auth-forgot-button"
+                type="button"
+                disabled={loading}
+                onClick={forgotPassword}
+              >
+
+                Am uitat parola
+
+              </button>
+
+            </>
+
+          )}
+
+
+
+          {/* MOD REGISTER */}
+
+          {registerMode && (
+
+            <>
+
+              <button
+                className="auth-login-button"
+                type="button"
+                disabled={loading}
+                onClick={register}
+              >
+
+                {loading
+                  ? 'Se creează contul...'
+                  : 'Register'
+                }
+
+              </button>
+
+
+              <button
+                className="auth-register-button"
+                type="button"
+                disabled={loading}
+
+                onClick={() => {
+
+                  clearMessages()
+
+                  setRegisterMode(false)
+
+                }}
+              >
+
+                Înapoi la Login
+
+              </button>
+
+            </>
+
+          )}
 
 
         </div>
