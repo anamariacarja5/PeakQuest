@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { supabase } from './lib/supabase'
 
@@ -26,31 +26,22 @@ import './App.css'
 // SETĂRI
 // =====================================================
 
-/*
-  Căutăm vârfuri într-o rază mai mare deoarece
-  fotografia poate fi făcută pe traseu, nu exact
-  pe coordonatele vârfului.
-*/
-const PEAK_SEARCH_RADIUS = 8000
+const PEAK_SEARCH_RADIUS = 1500
 
 /*
-  Dacă fotografia este foarte aproape de un vârf,
+  Dacă fotografia este foarte aproape de vârf,
   îl acceptăm automat.
 */
 const PEAK_AUTO_ACCEPT_DISTANCE = 350
 
 /*
-  Până la această distanță afișăm vârful ca opțiune
-  și lăsăm utilizatorul să confirme ce vârf a vizitat.
+  Dacă fotografia este între 350 m și 1500 m
+  de cel mai apropiat vârf, întrebăm utilizatorul
+  dacă vrea să o considere vizită pe acel vârf.
 */
-const PEAK_CONFIRM_DISTANCE = 8000
+const PEAK_CONFIRM_DISTANCE = 1500
 
-/*
-  Nu încărcăm utilizatorul cu prea multe opțiuni.
-*/
-const MAX_PEAK_CANDIDATES = 8
-
-const LOOKUP_TIMEOUT = 10000
+const LOOKUP_TIMEOUT = 8000
 
 const OVERPASS_URLS = [
   'https://overpass-api.de/api/interpreter',
@@ -58,6 +49,9 @@ const OVERPASS_URLS = [
 ]
 
 const PHOTO_BUCKET = 'VISIT-PHOTOS'
+
+const WIKIDATA_API_URL =
+  'https://www.wikidata.org/w/api.php'
 
 const ROMANIA_CENTER: [number, number] = [
   45.8,
@@ -68,6 +62,12 @@ const ROMANIA_CENTER: [number, number] = [
 // =====================================================
 // TIPURI
 // =====================================================
+
+type LocationTypeChoice =
+  | 'peak'
+  | 'place'
+  | null
+
 
 type PeakInfo = {
 
@@ -82,6 +82,21 @@ type PeakInfo = {
   distance: number
 
   mountainRange: string | null
+
+}
+
+
+type PeakMetadata = {
+
+  elevation: number | null
+
+  mountainRange: string | null
+
+  latitude: number | null
+
+  longitude: number | null
+
+  name: string | null
 
 }
 
@@ -107,1127 +122,119 @@ type ReverseLocation = {
 }
 
 
-type LocationTypeChoice =
-  'peak'
-  |
-  'normal'
-  |
-  null
-
-
-
-
 // =====================================================
-// WIKIDATA - DATE REALE DESPRE VÂRF
+// ICON MUNTE - DIMENSIUNE DINAMICĂ DUPĂ ZOOM
+// =====================================================
+//
+// Când harta este depărtată, emoji-urile devin mai mici,
+// ca să nu se suprapună și să poți distinge mai bine
+// pozițiile.
+//
+// Când apropii harta, markerul revine treptat la dimensiunea
+// mare, ușor de apăsat pe telefon.
 // =====================================================
 
-type WikidataPeakMetadata = {
-  elevation: number | null
-  mountainRange: string | null
-  latitude: number | null
-  longitude: number | null
-}
-
-const WIKIDATA_API_URL =
-  'https://www.wikidata.org/w/api.php'
-
-const wikidataPeakCache =
-  new Map<string, WikidataPeakMetadata>()
-
-
-function normalizePeakLookupName(
-  value: string
+function getMountainIcon(
+  zoom: number
 ) {
 
-  return value
-
-    .toLowerCase()
-
-    .normalize(
-      'NFD'
-    )
-
-    .replace(
-      /[\u0300-\u036f]/g,
-      ''
-    )
-
-    .replace(
-      /^varful\s+/,
-      ''
-    )
-
-    .replace(
-      /^vf\.?\s+/,
-      ''
-    )
-
-    .replace(
-      /[^a-z0-9\s-]/g,
-      ' '
-    )
-
-    .replace(
-      /\s+/g,
-      ' '
-    )
-
-    .trim()
-
-}
-
-
-function calculateGeoDistance(
-
-  lat1: number,
-
-  lon1: number,
-
-  lat2: number,
-
-  lon2: number
-
-) {
-
-  const earthRadius =
-    6371000
-
-
-  const lat1Rad =
-    lat1 *
-    Math.PI /
-    180
-
-
-  const lat2Rad =
-    lat2 *
-    Math.PI /
-    180
-
-
-  const deltaLat =
-    (
-      lat2 -
-      lat1
-    )
-    *
-    Math.PI /
-    180
-
-
-  const deltaLon =
-    (
-      lon2 -
-      lon1
-    )
-    *
-    Math.PI /
-    180
-
-
-  const a =
-
-    Math.sin(
-      deltaLat / 2
-    )
-    *
-    Math.sin(
-      deltaLat / 2
-    )
-
-    +
-
-    Math.cos(
-      lat1Rad
-    )
-    *
-    Math.cos(
-      lat2Rad
-    )
-    *
-    Math.sin(
-      deltaLon / 2
-    )
-    *
-    Math.sin(
-      deltaLon / 2
-    )
-
-
-  const c =
-    2
-    *
-    Math.atan2(
-
-      Math.sqrt(a),
-
-      Math.sqrt(
-        1 - a
-      )
-
-    )
-
-
-  return (
-    earthRadius *
-    c
-  )
-
-}
-
-
-async function wikidataSearchIds(
-  search: string,
-  language: 'ro' | 'en'
-): Promise<string[]> {
-
-  try {
-
-    const params =
-      new URLSearchParams({
-
-        action:
-          'wbsearchentities',
-
-        search,
-
-        language,
-
-        uselang:
-          language,
-
-        type:
-          'item',
-
-        limit:
-          '10',
-
-        format:
-          'json',
-
-        origin:
-          '*'
-
-      })
-
-
-    const response =
-      await fetch(
-
-        `${WIKIDATA_API_URL}?${params.toString()}`
-
-      )
-
-
-    if (
-      !response.ok
-    ) {
-
-      return []
-
-    }
-
-
-    const data =
-      await response.json()
-
-
-    if (
-      !Array.isArray(
-        data.search
-      )
-    ) {
-
-      return []
-
-    }
-
-
-    return data.search
-
-      .map(
-        (
-          item: any
-        ) =>
-          item.id
-      )
-
-      .filter(
-        (
-          id: unknown
-        ): id is string =>
-          typeof id ===
-          'string'
-      )
-
-  }
-
-  catch (
-    error
-  ) {
-
-    console.log(
-      'Eroare căutare Wikidata:',
-      error
-    )
-
-
-    return []
-
-  }
-
-}
-
-
-async function wikidataGetEntities(
-  ids: string[]
-): Promise<any[]> {
-
-  const uniqueIds =
-    Array.from(
-      new Set(
-        ids
-      )
-    )
-      .filter(Boolean)
+  let fontSize = 38
+  let boxSize = 42
 
 
   if (
-    uniqueIds.length ===
-    0
+    zoom <= 6
   ) {
 
-    return []
+    fontSize = 16
+    boxSize = 20
 
   }
 
-
-  try {
-
-    const params =
-      new URLSearchParams({
-
-        action:
-          'wbgetentities',
-
-        ids:
-          uniqueIds.join('|'),
-
-        props:
-          'labels|aliases|descriptions|claims',
-
-        languages:
-          'ro|en',
-
-        languagefallback:
-          '1',
-
-        format:
-          'json',
-
-        origin:
-          '*'
-
-      })
-
-
-    const response =
-      await fetch(
-
-        `${WIKIDATA_API_URL}?${params.toString()}`
-
-      )
-
-
-    if (
-      !response.ok
-    ) {
-
-      return []
-
-    }
-
-
-    const data =
-      await response.json()
-
-
-    if (
-      !data.entities
-    ) {
-
-      return []
-
-    }
-
-
-    return uniqueIds
-
-      .map(
-        (
-          id
-        ) =>
-          data.entities[id]
-      )
-
-      .filter(Boolean)
-
-  }
-
-  catch (
-    error
+  else if (
+    zoom <= 7
   ) {
 
-    console.log(
-      'Eroare citire Wikidata:',
-      error
-    )
-
-
-    return []
+    fontSize = 19
+    boxSize = 23
 
   }
 
-}
-
-
-function getWikidataQuantity(
-  entity: any,
-  propertyId: string
-): number | null {
-
-  const claims =
-    entity
-      ?.claims
-      ?.[propertyId]
-    ??
-    []
-
-
-  for (
-    const claim
-    of claims
+  else if (
+    zoom <= 8
   ) {
 
-    const amount =
-      claim
-        ?.mainsnak
-        ?.datavalue
-        ?.value
-        ?.amount
-
-
-    if (
-      amount ===
-      undefined
-      ||
-      amount ===
-      null
-    ) {
-
-      continue
-
-    }
-
-
-    const parsed =
-      Number.parseFloat(
-        String(
-          amount
-        )
-      )
-
-
-    if (
-      Number.isFinite(
-        parsed
-      )
-    ) {
-
-      return Math.round(
-        parsed
-      )
-
-    }
+    fontSize = 22
+    boxSize = 26
 
   }
 
-
-  return null
-
-}
-
-
-function getWikidataCoordinates(
-  entity: any
-): {
-  latitude: number | null
-  longitude: number | null
-} {
-
-  const claims =
-    entity
-      ?.claims
-      ?.P625
-    ??
-    []
-
-
-  for (
-    const claim
-    of claims
+  else if (
+    zoom <= 9
   ) {
 
-    const value =
-      claim
-        ?.mainsnak
-        ?.datavalue
-        ?.value
-
-
-    const latitude =
-      Number(
-        value?.latitude
-      )
-
-
-    const longitude =
-      Number(
-        value?.longitude
-      )
-
-
-    if (
-      Number.isFinite(
-        latitude
-      )
-      &&
-      Number.isFinite(
-        longitude
-      )
-    ) {
-
-      return {
-        latitude,
-        longitude
-      }
-
-    }
+    fontSize = 25
+    boxSize = 29
 
   }
 
-
-  return {
-    latitude:
-      null,
-    longitude:
-      null
-  }
-
-}
-
-
-function getWikidataItemClaimIds(
-  entity: any,
-  propertyId: string
-): string[] {
-
-  const claims =
-    entity
-      ?.claims
-      ?.[propertyId]
-    ??
-    []
-
-
-  return claims
-
-    .map(
-      (
-        claim: any
-      ) =>
-        claim
-          ?.mainsnak
-          ?.datavalue
-          ?.value
-          ?.id
-    )
-
-    .filter(
-      (
-        id: unknown
-      ): id is string =>
-        typeof id ===
-        'string'
-    )
-
-}
-
-
-function getWikidataEntityNames(
-  entity: any
-): string[] {
-
-  const names =
-    new Set<string>()
-
-
-  const roLabel =
-    entity
-      ?.labels
-      ?.ro
-      ?.value
-
-
-  const enLabel =
-    entity
-      ?.labels
-      ?.en
-      ?.value
-
-
-  if (
-    roLabel
+  else if (
+    zoom <= 10
   ) {
 
-    names.add(
-      roLabel
-    )
+    fontSize = 28
+    boxSize = 32
 
   }
 
-
-  if (
-    enLabel
+  else if (
+    zoom <= 11
   ) {
 
-    names.add(
-      enLabel
-    )
+    fontSize = 31
+    boxSize = 35
 
   }
 
-
-  for (
-    const alias
-    of entity
-      ?.aliases
-      ?.ro
-    ??
-    []
+  else if (
+    zoom <= 12
   ) {
 
-    if (
-      alias?.value
-    ) {
-
-      names.add(
-        alias.value
-      )
-
-    }
+    fontSize = 34
+    boxSize = 38
 
   }
 
 
-  for (
-    const alias
-    of entity
-      ?.aliases
-      ?.en
-    ??
-    []
-  ) {
-
-    if (
-      alias?.value
-    ) {
-
-      names.add(
-        alias.value
-      )
-
-    }
-
-  }
-
-
-  return Array.from(
-    names
-  )
-
-}
-
-
-function getWikidataEntityLabel(
-  entity: any
-): string | null {
-
-  return (
-    entity
-      ?.labels
-      ?.ro
-      ?.value
-
-    ||
-
-    entity
-      ?.labels
-      ?.en
-      ?.value
-
-    ||
-
-    null
-  )
-
-}
-
-
-async function getPeakMetadataByName(
-
-  peakName: string,
-
-  photoLatitude: number,
-
-  photoLongitude: number
-
-): Promise<WikidataPeakMetadata> {
-
-  const cleanName =
-    peakName
-
-      .replace(
-        /^V[âa]rful\s+/i,
-        ''
-      )
-
-      .replace(
-        /^Vf\.?\s*/i,
-        ''
-      )
-
-      .trim()
-
-
-  const cacheKey =
-    normalizePeakLookupName(
-      cleanName
+  const anchorX =
+    Math.round(
+      boxSize / 2
     )
 
 
-  const cached =
-    wikidataPeakCache.get(
-      cacheKey
+  const anchorY =
+    Math.round(
+      boxSize * 0.9
     )
 
 
-  if (
-    cached
-  ) {
-
-    return cached
-
-  }
-
-
-  const searchQueries =
-    Array.from(
-      new Set([
-        cleanName,
-        `Vârful ${cleanName}`
-      ])
-    )
-
-
-  const searchResults =
-    await Promise.all(
-
-      searchQueries.flatMap(
-        (
-          query
-        ) => [
-
-          wikidataSearchIds(
-            query,
-            'ro'
-          ),
-
-          wikidataSearchIds(
-            query,
-            'en'
-          )
-
-        ]
-      )
-
-    )
-
-
-  const ids =
-    Array.from(
-      new Set(
-        searchResults.flat()
-      )
-    )
-      .slice(
-        0,
-        30
-      )
-
-
-  const entities =
-    await wikidataGetEntities(
-      ids
-    )
-
-
-  if (
-    entities.length ===
-    0
-  ) {
-
-    const empty = {
-      elevation:
-        null,
-      mountainRange:
-        null,
-      latitude:
-        null,
-      longitude:
-        null
-    }
-
-
-    wikidataPeakCache.set(
-      cacheKey,
-      empty
-    )
-
-
-    return empty
-
-  }
-
-
-  const requestedName =
-    normalizePeakLookupName(
-      cleanName
-    )
-
-
-  const ranked =
-    entities
-
-      .map(
-        (
-          entity: any,
-          index: number
-        ) => {
-
-          const names =
-            getWikidataEntityNames(
-              entity
-            )
-
-
-          let nameScore =
-            1000
-
-
-          for (
-            const name
-            of names
-          ) {
-
-            const normalized =
-              normalizePeakLookupName(
-                name
-              )
-
-
-            if (
-              normalized ===
-              requestedName
-            ) {
-
-              nameScore =
-                Math.min(
-                  nameScore,
-                  0
-                )
-
-            }
-
-            else if (
-              normalized.includes(
-                requestedName
-              )
-              ||
-              requestedName.includes(
-                normalized
-              )
-            ) {
-
-              nameScore =
-                Math.min(
-                  nameScore,
-                  100
-                )
-
-            }
-
-          }
-
-
-          const elevation =
-            getWikidataQuantity(
-              entity,
-              'P2044'
-            )
-
-
-          const coordinates =
-            getWikidataCoordinates(
-              entity
-            )
-
-
-          const description =
-            normalizePeakLookupName(
-
-              `${
-                entity
-                  ?.descriptions
-                  ?.ro
-                  ?.value
-                ??
-                ''
-              } ${
-                entity
-                  ?.descriptions
-                  ?.en
-                  ?.value
-                ??
-                ''
-              }`
-
-            )
-
-
-          let score =
-            nameScore
-            +
-            index
-
-
-          if (
-            elevation !==
-            null
-          ) {
-
-            score -=
-              300
-
-          }
-
-
-          if (
-            description.includes(
-              'mountain'
-            )
-            ||
-            description.includes(
-              'peak'
-            )
-            ||
-            description.includes(
-              'summit'
-            )
-            ||
-            description.includes(
-              'varf'
-            )
-            ||
-            description.includes(
-              'munte'
-            )
-          ) {
-
-            score -=
-              250
-
-          }
-
-
-          let distance =
-            Number.POSITIVE_INFINITY
-
-
-          if (
-            coordinates.latitude !==
-            null
-            &&
-            coordinates.longitude !==
-            null
-          ) {
-
-            distance =
-              calculateGeoDistance(
-
-                photoLatitude,
-
-                photoLongitude,
-
-                coordinates.latitude,
-
-                coordinates.longitude
-
-              )
-
-
-            /*
-              Coordonatele sunt foarte utile la dezambiguizare.
-              Omu din Bucegi va fi mult mai aproape de fotografia
-              utilizatorului decât o entitate cu același nume
-              din altă parte.
-            */
-
-            score +=
-              Math.min(
-                distance /
-                1000,
-                500
-              )
-
-          }
-
-          else {
-
-            score +=
-              500
-
-          }
-
-
-          return {
-            entity,
-            score,
-            elevation,
-            coordinates,
-            distance
-          }
-
-        }
-      )
-
-      .sort(
-        (
-          a,
-          b
-        ) =>
-          a.score -
-          b.score
-      )
-
-
-  const best =
-    ranked[0]
-
-
-  if (
-    !best
-  ) {
-
-    return {
-      elevation:
-        null,
-      mountainRange:
-        null,
-      latitude:
-        null,
-      longitude:
-        null
-    }
-
-  }
-
-
-  let mountainRange:
-    string | null =
-    null
-
-
-  const rangeIds =
-    getWikidataItemClaimIds(
-      best.entity,
-      'P4552'
-    )
-
-
-  if (
-    rangeIds.length >
-    0
-  ) {
-
-    const rangeEntities =
-      await wikidataGetEntities(
-        rangeIds
-      )
-
-
-    mountainRange =
-      getWikidataEntityLabel(
-        rangeEntities[0]
-      )
-
-  }
-
-
-  const result: WikidataPeakMetadata = {
-
-    elevation:
-      best.elevation,
-
-    mountainRange,
-
-    latitude:
-      best.coordinates.latitude,
-
-    longitude:
-      best.coordinates.longitude
-
-  }
-
-
-  wikidataPeakCache.set(
-    cacheKey,
-    result
-  )
-
-
-  return result
-
-}
-
-
-// =====================================================
-// ICON MUNTE
-// =====================================================
-
-const mountainIcon =
-  divIcon({
+  return divIcon({
 
     html: `
       <div
         style="
-          font-size: 38px;
-          line-height: 38px;
-          width: 42px;
-          height: 42px;
+          font-size: ${fontSize}px;
+          line-height: ${boxSize}px;
+          width: ${boxSize}px;
+          height: ${boxSize}px;
           text-align: center;
           background: transparent;
           border: none;
+          transition:
+            font-size 0.15s ease,
+            width 0.15s ease,
+            height 0.15s ease,
+            line-height 0.15s ease;
         "
       >
         🏔️
@@ -1238,15 +245,26 @@ const mountainIcon =
       'mountain-marker',
 
     iconSize:
-      [42, 42],
+      [
+        boxSize,
+        boxSize
+      ],
 
     iconAnchor:
-      [21, 38],
+      [
+        anchorX,
+        anchorY
+      ],
 
     popupAnchor:
-      [0, -38]
+      [
+        0,
+        -anchorY
+      ]
 
   })
+
+}
 
 
 // =====================================================
@@ -1366,6 +384,362 @@ function MapController({
 
 
   return null
+
+}
+
+
+
+// =====================================================
+// ICON LOCAȚIE NORMALĂ - FĂRĂ IMAGINI EXTERNE
+// =====================================================
+//
+// Nu mai folosim marker-icon.png din Leaflet.
+// Pinul este desenat direct din HTML/CSS, deci:
+// - merge în browser
+// - merge în build Vite
+// - merge în Capacitor / Android
+// - nu mai poate apărea simbolul de "imagine lipsă"
+//
+// Și acest marker se micșorează când faci zoom out.
+// =====================================================
+
+function getPlaceIcon(
+  zoom: number
+) {
+
+  let size = 30
+
+
+  if (
+    zoom <= 6
+  ) {
+
+    size = 14
+
+  }
+
+  else if (
+    zoom <= 7
+  ) {
+
+    size = 17
+
+  }
+
+  else if (
+    zoom <= 8
+  ) {
+
+    size = 20
+
+  }
+
+  else if (
+    zoom <= 9
+  ) {
+
+    size = 23
+
+  }
+
+  else if (
+    zoom <= 10
+  ) {
+
+    size = 26
+
+  }
+
+  else if (
+    zoom <= 11
+  ) {
+
+    size = 28
+
+  }
+
+
+  const pinSize =
+    size
+
+
+  const dotSize =
+    Math.max(
+      4,
+      Math.round(
+        size * 0.28
+      )
+    )
+
+
+  const anchorX =
+    Math.round(
+      pinSize / 2
+    )
+
+
+  const anchorY =
+    Math.round(
+      pinSize * 1.12
+    )
+
+
+  return divIcon({
+
+    className:
+      'peakquest-place-marker',
+
+    html: `
+      <div
+        style="
+          position: relative;
+          width: ${pinSize}px;
+          height: ${pinSize}px;
+        "
+      >
+        <div
+          style="
+            position: absolute;
+            left: 50%;
+            top: 45%;
+            width: ${pinSize}px;
+            height: ${pinSize}px;
+            transform:
+              translate(-50%, -50%)
+              rotate(-45deg);
+            border-radius:
+              50% 50% 50% 0;
+            background:
+              #2f86d7;
+            border:
+              ${Math.max(
+                1,
+                Math.round(
+                  size * 0.07
+                )
+              )}px solid rgba(255,255,255,0.95);
+            box-shadow:
+              0 2px 5px rgba(0,0,0,0.38);
+            box-sizing:
+              border-box;
+          "
+        >
+          <div
+            style="
+              position: absolute;
+              left: 50%;
+              top: 50%;
+              width: ${dotSize}px;
+              height: ${dotSize}px;
+              transform:
+                translate(-50%, -50%);
+              border-radius: 50%;
+              background: white;
+            "
+          ></div>
+        </div>
+      </div>
+    `,
+
+    iconSize:
+      [
+        pinSize,
+        Math.round(
+          pinSize * 1.18
+        )
+      ],
+
+    iconAnchor:
+      [
+        anchorX,
+        anchorY
+      ],
+
+    popupAnchor:
+      [
+        0,
+        -anchorY
+      ]
+
+  })
+
+}
+
+
+// =====================================================
+// MARKERE CARE REACȚIONEAZĂ LA ZOOM
+// =====================================================
+
+type ZoomAwareMarkersProps = {
+
+  visits:
+    any[]
+
+  renderPopup:
+    (
+      visit:
+        any
+    ) => ReactNode
+
+}
+
+
+function ZoomAwareMarkers({
+
+  visits,
+
+  renderPopup
+
+}: ZoomAwareMarkersProps) {
+
+  const map =
+    useMap()
+
+
+  const [
+    zoom,
+    setZoom
+  ] =
+    useState(
+      map.getZoom()
+    )
+
+
+  useEffect(() => {
+
+    const handleZoom =
+      () => {
+
+        setZoom(
+          map.getZoom()
+        )
+
+      }
+
+
+    map.on(
+      'zoomend',
+      handleZoom
+    )
+
+
+    return () => {
+
+      map.off(
+        'zoomend',
+        handleZoom
+      )
+
+    }
+
+  }, [
+    map
+  ])
+
+
+  const mountainIcon =
+    getMountainIcon(
+      zoom
+    )
+
+
+  const placeIcon =
+    getPlaceIcon(
+      zoom
+    )
+
+
+  return (
+    <>
+
+      {
+        visits.map(
+
+          (
+            visit
+          ) => {
+
+
+            if (
+              visit.is_peak
+            ) {
+
+              return (
+
+                <Marker
+
+                  key={
+                    visit.id
+                  }
+
+                  position={[
+                    Number(
+                      visit.latitude
+                    ),
+                    Number(
+                      visit.longitude
+                    )
+                  ]}
+
+                  icon={
+                    mountainIcon
+                  }
+
+                >
+
+                  {
+                    renderPopup(
+                      visit
+                    )
+                  }
+
+                </Marker>
+
+              )
+
+            }
+
+
+            return (
+
+              <Marker
+
+                key={
+                  visit.id
+                }
+
+                position={[
+                  Number(
+                    visit.latitude
+                  ),
+                  Number(
+                    visit.longitude
+                  )
+                ]}
+
+                icon={
+                  placeIcon
+                }
+
+              >
+
+                {
+                  renderPopup(
+                    visit
+                  )
+                }
+
+              </Marker>
+
+            )
+
+          }
+
+        )
+      }
+
+    </>
+  )
 
 }
 
@@ -1509,11 +883,10 @@ function App() {
 
   const locationTypeResolverRef =
     useRef<
-      ((
-        choice: LocationTypeChoice
-      ) => void)
-      |
-      null
+      (
+        value:
+          LocationTypeChoice
+      ) => void
     >(
       null
     )
@@ -1570,14 +943,22 @@ function App() {
 
 
   // ===================================================
-  // STATUSUL DE SUCCES DISPARE DUPĂ 3 SECUNDE
+  // STATUSUL FINAL DISPARE AUTOMAT
+  // ===================================================
+  //
+  // Pe Android, alert()/prompt() poate bloca temporar
+  // timer-ele din WebView. De aceea pornim timer-ul
+  // numai DUPĂ ce procesarea fotografiei s-a terminat.
+  //
+  // Astfel dispar și mesajele finale care nu conțin ✅.
   // ===================================================
 
   useEffect(() => {
 
     if (
-      !status ||
-      !status.includes('✅')
+      !status
+      ||
+      processing
     ) {
 
       return
@@ -1594,7 +975,7 @@ function App() {
 
         },
 
-        3000
+        3500
 
       )
 
@@ -1607,7 +988,10 @@ function App() {
 
     }
 
-  }, [status])
+  }, [
+    status,
+    processing
+  ])
 
 
   // ===================================================
@@ -1720,257 +1104,13 @@ function App() {
     }
 
 
-    const loadedVisits =
+    setVisits(
       data ??
       []
-
-
-    /*
-      IMPORTANT:
-      Dacă avem deja un vârf salvat cu is_peak = true,
-      dar altitudinea sau masivul lipsesc, încercăm
-      automat să le completăm din Wikidata.
-
-      Asta repară inclusiv vârfurile deja salvate,
-      fără să fie nevoie să le ștergi și să le adaugi din nou.
-    */
-
-    const enrichedVisits =
-      await Promise.all(
-
-        loadedVisits.map(
-
-          async (
-            visit: any
-          ) => {
-
-            if (
-              visit.is_peak !==
-              true
-            ) {
-
-              return visit
-
-            }
-
-
-            const elevationMissing =
-
-              visit.peak_elevation ===
-              null
-
-              ||
-
-              visit.peak_elevation ===
-              undefined
-
-              ||
-
-              visit.peak_elevation ===
-              ''
-
-
-            const mountainRangeMissing =
-
-              !visit.mountain_range
-              ||
-              !String(
-                visit.mountain_range
-              )
-                .trim()
-
-
-            if (
-              !elevationMissing
-              &&
-              !mountainRangeMissing
-            ) {
-
-              return visit
-
-            }
-
-
-            const peakName =
-              String(
-                visit.place_name
-                ??
-                ''
-              )
-                .trim()
-
-
-            if (
-              !peakName
-            ) {
-
-              return visit
-
-            }
-
-
-            const latitude =
-              Number(
-                visit.latitude
-              )
-
-
-            const longitude =
-              Number(
-                visit.longitude
-              )
-
-
-            if (
-              !Number.isFinite(
-                latitude
-              )
-              ||
-              !Number.isFinite(
-                longitude
-              )
-            ) {
-
-              return visit
-
-            }
-
-
-            const metadata =
-              await getPeakMetadataByName(
-
-                peakName,
-
-                latitude,
-
-                longitude
-
-              )
-
-
-            const updatedVisit = {
-
-              ...visit,
-
-              peak_elevation:
-
-                elevationMissing
-
-                  ? metadata.elevation
-
-                  : visit.peak_elevation,
-
-              mountain_range:
-
-                mountainRangeMissing
-
-                  ? metadata.mountainRange
-
-                  : visit.mountain_range
-
-            }
-
-
-            const updateData:
-              Record<string, any> =
-              {}
-
-
-            if (
-              elevationMissing
-              &&
-              metadata.elevation !==
-              null
-            ) {
-
-              updateData
-                .peak_elevation =
-                  metadata.elevation
-
-            }
-
-
-            if (
-              mountainRangeMissing
-              &&
-              metadata.mountainRange
-            ) {
-
-              updateData
-                .mountain_range =
-                  metadata.mountainRange
-
-            }
-
-
-            /*
-              Încercăm și să persistăm completarea în Supabase.
-              Chiar dacă politica UPDATE nu permite momentan,
-              UI-ul folosește oricum updatedVisit și va afișa
-              altitudinea în sesiunea curentă.
-            */
-
-            if (
-              Object.keys(
-                updateData
-              )
-                .length >
-              0
-            ) {
-
-              const {
-                error:
-                  updateError
-              } =
-                await supabase
-
-                  .from(
-                    'visits'
-                  )
-
-                  .update(
-                    updateData
-                  )
-
-                  .eq(
-                    'id',
-                    visit.id
-                  )
-
-                  .eq(
-                    'user_id',
-                    user.id
-                  )
-
-
-              if (
-                updateError
-              ) {
-
-                console.log(
-                  'Nu am putut salva metadatele vârfului în Supabase:',
-                  updateError
-                )
-
-              }
-
-            }
-
-
-            return updatedVisit
-
-          }
-
-        )
-
-      )
-
-
-    setVisits(
-      enrichedVisits
     )
 
   }
+
 
   // ===================================================
   // UPLOAD FOTOGRAFIE
@@ -2624,20 +1764,2138 @@ function App() {
 
 
   // ===================================================
-  // CĂUTARE VÂRF
+  // NORMALIZARE NUME PENTRU WIKIDATA
   // ===================================================
 
-  async function getNearbyPeaks(
+  function normalizePeakLookupName(
+    value: string
+  ) {
+
+    return value
+
+      .toLowerCase()
+
+      .normalize(
+        'NFD'
+      )
+
+      .replace(
+        /[\u0300-\u036f]/g,
+        ''
+      )
+
+      .replace(
+        /^varful\s+/,
+        ''
+      )
+
+      .replace(
+        /^vf\.?\s+/,
+        ''
+      )
+
+      .replace(
+        /[^a-z0-9\s-]/g,
+        ' '
+      )
+
+      .replace(
+        /\s+/g,
+        ' '
+      )
+
+      .trim()
+
+  }
+
+
+  // ===================================================
+  // WIKIDATA SEARCH
+  // ===================================================
+
+  async function wikidataSearchIds(
+    search: string,
+    language:
+      'ro' |
+      'en'
+  ): Promise<string[]> {
+
+    try {
+
+      const params =
+        new URLSearchParams({
+
+          action:
+            'wbsearchentities',
+
+          search,
+
+          language,
+
+          uselang:
+            language,
+
+          type:
+            'item',
+
+          limit:
+            '10',
+
+          format:
+            'json',
+
+          origin:
+            '*'
+
+        })
+
+
+      const response =
+        await fetchWithTimeout(
+
+          `${WIKIDATA_API_URL}?${params.toString()}`,
+
+          {},
+
+          LOOKUP_TIMEOUT
+
+        )
+
+
+      if (
+        !response.ok
+      ) {
+
+        return []
+
+      }
+
+
+      const data =
+        await response.json()
+
+
+      if (
+        !Array.isArray(
+          data.search
+        )
+      ) {
+
+        return []
+
+      }
+
+
+      return data.search
+
+        .map(
+          (
+            item: any
+          ) =>
+            item.id
+        )
+
+        .filter(
+          (
+            id: unknown
+          ): id is string =>
+            typeof id ===
+            'string'
+        )
+
+    }
+
+    catch (
+      error
+    ) {
+
+      console.log(
+        'Eroare căutare Wikidata:',
+        error
+      )
+
+
+      return []
+
+    }
+
+  }
+
+
+  // ===================================================
+  // WIKIDATA ENTITIES
+  // ===================================================
+
+  async function wikidataGetEntities(
+    ids: string[]
+  ): Promise<any[]> {
+
+    const uniqueIds =
+      Array.from(
+        new Set(
+          ids
+        )
+      )
+        .filter(Boolean)
+
+
+    if (
+      uniqueIds.length ===
+      0
+    ) {
+
+      return []
+
+    }
+
+
+    try {
+
+      const params =
+        new URLSearchParams({
+
+          action:
+            'wbgetentities',
+
+          ids:
+            uniqueIds.join('|'),
+
+          props:
+            'labels|aliases|descriptions|claims',
+
+          languages:
+            'ro|en',
+
+          languagefallback:
+            '1',
+
+          format:
+            'json',
+
+          origin:
+            '*'
+
+        })
+
+
+      const response =
+        await fetchWithTimeout(
+
+          `${WIKIDATA_API_URL}?${params.toString()}`,
+
+          {},
+
+          LOOKUP_TIMEOUT
+
+        )
+
+
+      if (
+        !response.ok
+      ) {
+
+        return []
+
+      }
+
+
+      const data =
+        await response.json()
+
+
+      if (
+        !data.entities
+      ) {
+
+        return []
+
+      }
+
+
+      return uniqueIds
+
+        .map(
+          (
+            id
+          ) =>
+            data.entities[id]
+        )
+
+        .filter(Boolean)
+
+    }
+
+    catch (
+      error
+    ) {
+
+      console.log(
+        'Eroare citire Wikidata:',
+        error
+      )
+
+
+      return []
+
+    }
+
+  }
+
+
+  // ===================================================
+  // WIKIDATA CLAIMS
+  // ===================================================
+
+  function getWikidataQuantity(
+    entity: any,
+    propertyId: string
+  ): number | null {
+
+    const claims =
+      entity
+        ?.claims
+        ?.[propertyId]
+      ??
+      []
+
+
+    for (
+      const claim
+      of claims
+    ) {
+
+      const amount =
+        claim
+          ?.mainsnak
+          ?.datavalue
+          ?.value
+          ?.amount
+
+
+      const elevation =
+        parseElevation(
+          amount
+        )
+
+
+      if (
+        elevation !==
+        null
+      ) {
+
+        return elevation
+
+      }
+
+    }
+
+
+    return null
+
+  }
+
+
+  function getWikidataCoordinates(
+    entity: any
+  ) {
+
+    const claims =
+      entity
+        ?.claims
+        ?.P625
+      ??
+      []
+
+
+    for (
+      const claim
+      of claims
+    ) {
+
+      const value =
+        claim
+          ?.mainsnak
+          ?.datavalue
+          ?.value
+
+
+      const latitude =
+        Number(
+          value?.latitude
+        )
+
+
+      const longitude =
+        Number(
+          value?.longitude
+        )
+
+
+      if (
+        Number.isFinite(
+          latitude
+        )
+        &&
+        Number.isFinite(
+          longitude
+        )
+      ) {
+
+        return {
+          latitude,
+          longitude
+        }
+
+      }
+
+    }
+
+
+    return {
+      latitude:
+        null,
+      longitude:
+        null
+    }
+
+  }
+
+
+  function getWikidataItemIds(
+    entity: any,
+    propertyId: string
+  ): string[] {
+
+    const claims =
+      entity
+        ?.claims
+        ?.[propertyId]
+      ??
+      []
+
+
+    return claims
+
+      .map(
+        (
+          claim: any
+        ) =>
+          claim
+            ?.mainsnak
+            ?.datavalue
+            ?.value
+            ?.id
+      )
+
+      .filter(
+        (
+          id: unknown
+        ): id is string =>
+          typeof id ===
+          'string'
+      )
+
+  }
+
+
+  function getWikidataNames(
+    entity: any
+  ): string[] {
+
+    const names =
+      new Set<string>()
+
+
+    const roLabel =
+      entity
+        ?.labels
+        ?.ro
+        ?.value
+
+
+    const enLabel =
+      entity
+        ?.labels
+        ?.en
+        ?.value
+
+
+    if (
+      roLabel
+    ) {
+
+      names.add(
+        roLabel
+      )
+
+    }
+
+
+    if (
+      enLabel
+    ) {
+
+      names.add(
+        enLabel
+      )
+
+    }
+
+
+    for (
+      const alias
+      of entity
+        ?.aliases
+        ?.ro
+      ??
+      []
+    ) {
+
+      if (
+        alias?.value
+      ) {
+
+        names.add(
+          alias.value
+        )
+
+      }
+
+    }
+
+
+    for (
+      const alias
+      of entity
+        ?.aliases
+        ?.en
+      ??
+      []
+    ) {
+
+      if (
+        alias?.value
+      ) {
+
+        names.add(
+          alias.value
+        )
+
+      }
+
+    }
+
+
+    return Array.from(
+      names
+    )
+
+  }
+
+
+  function getWikidataLabel(
+    entity: any
+  ): string | null {
+
+    return (
+      entity
+        ?.labels
+        ?.ro
+        ?.value
+
+      ||
+
+      entity
+        ?.labels
+        ?.en
+        ?.value
+
+      ||
+
+      null
+    )
+
+  }
+
+
+  // ===================================================
+  // METADATE VÂRF DIN WIKIDATA
+  // ===================================================
+  //
+  // Nu schimbăm deloc:
+  // - GPS-ul fotografiei
+  // - Nominatim / locația-traseul
+  // - markerul
+  //
+  // Folosim această funcție doar pentru:
+  // - altitudine
+  // - masiv
+  // ===================================================
+
+  async function getPeakMetadataFromWikidata(
+
+    peakName: string,
+
+    peakLatitude:
+      number | null = null,
+
+    peakLongitude:
+      number | null = null
+
+  ): Promise<PeakMetadata> {
+
+    const cleanName =
+      peakName
+
+        .replace(
+          /^V[âa]rful\s+/i,
+          ''
+        )
+
+        .replace(
+          /^Vf\.?\s*/i,
+          ''
+        )
+
+        .trim()
+
+
+    const words =
+      cleanName
+
+        .split(
+          /\s+/
+        )
+
+        .filter(Boolean)
+
+
+    /*
+      Ultimul cuvânt este un fallback generic util pentru
+      nume precum "Vârful Țuțuiatu".
+      Nu există nicio excepție hardcodată pentru un vârf.
+    */
+
+    const lastWord =
+      words.length >
+      1
+
+        ? words[
+            words.length - 1
+          ]
+
+        : cleanName
+
+
+    const searchQueries =
+      Array.from(
+        new Set([
+          cleanName,
+          `Vârful ${cleanName}`,
+          lastWord
+        ])
+      )
+
+
+    const results =
+      await Promise.all(
+
+        searchQueries.flatMap(
+          (
+            query
+          ) => [
+
+            wikidataSearchIds(
+              query,
+              'ro'
+            ),
+
+            wikidataSearchIds(
+              query,
+              'en'
+            )
+
+          ]
+        )
+
+      )
+
+
+    const ids =
+      Array.from(
+        new Set(
+          results.flat()
+        )
+      )
+        .slice(
+          0,
+          30
+        )
+
+
+    const entities =
+      await wikidataGetEntities(
+        ids
+      )
+
+
+    if (
+      entities.length ===
+      0
+    ) {
+
+      return {
+        elevation:
+          null,
+        mountainRange:
+          null,
+        latitude:
+          null,
+        longitude:
+          null,
+        name:
+          null
+      }
+
+    }
+
+
+    const requestedName =
+      normalizePeakLookupName(
+        cleanName
+      )
+
+
+    const ranked =
+      entities
+
+        .map(
+          (
+            entity: any,
+            index: number
+          ) => {
+
+            const names =
+              getWikidataNames(
+                entity
+              )
+
+
+            let nameScore =
+              1000
+
+
+            for (
+              const name
+              of names
+            ) {
+
+              const normalized =
+                normalizePeakLookupName(
+                  name
+                )
+
+
+              if (
+                normalized ===
+                requestedName
+              ) {
+
+                nameScore =
+                  Math.min(
+                    nameScore,
+                    0
+                  )
+
+              }
+
+              else if (
+                normalized.includes(
+                  requestedName
+                )
+                ||
+                requestedName.includes(
+                  normalized
+                )
+              ) {
+
+                nameScore =
+                  Math.min(
+                    nameScore,
+                    100
+                  )
+
+              }
+
+            }
+
+
+            const elevation =
+              getWikidataQuantity(
+                entity,
+                'P2044'
+              )
+
+
+            const coordinates =
+              getWikidataCoordinates(
+                entity
+              )
+
+
+            const description =
+              normalizePeakLookupName(
+
+                `${
+                  entity
+                    ?.descriptions
+                    ?.ro
+                    ?.value
+                  ??
+                  ''
+                } ${
+                  entity
+                    ?.descriptions
+                    ?.en
+                    ?.value
+                  ??
+                  ''
+                }`
+
+              )
+
+
+            let score =
+              nameScore
+              +
+              index
+
+
+            if (
+              elevation !==
+              null
+            ) {
+
+              score -=
+                250
+
+            }
+
+
+            if (
+              description.includes(
+                'mountain'
+              )
+              ||
+              description.includes(
+                'peak'
+              )
+              ||
+              description.includes(
+                'summit'
+              )
+              ||
+              description.includes(
+                'varf'
+              )
+              ||
+              description.includes(
+                'munte'
+              )
+            ) {
+
+              score -=
+                200
+
+            }
+
+
+            if (
+              peakLatitude !==
+              null
+              &&
+              peakLongitude !==
+              null
+              &&
+              coordinates.latitude !==
+              null
+              &&
+              coordinates.longitude !==
+              null
+            ) {
+
+              const distance =
+                calculateDistance(
+
+                  peakLatitude,
+
+                  peakLongitude,
+
+                  coordinates.latitude,
+
+                  coordinates.longitude
+
+                )
+
+
+              /*
+                Dacă avem coordonate din fotografie / OSM,
+                le folosim pentru dezambiguizare.
+              */
+
+              score +=
+                Math.min(
+                  distance /
+                  100,
+                  1000
+                )
+
+            }
+
+            else if (
+              coordinates.latitude ===
+              null
+              ||
+              coordinates.longitude ===
+              null
+            ) {
+
+              /*
+                Pentru pozele fără GPS preferăm entitățile
+                care au coordonate geografice.
+              */
+
+              score +=
+                600
+
+            }
+
+
+            return {
+              entity,
+              score,
+              elevation
+            }
+
+          }
+        )
+
+        .sort(
+          (
+            a,
+            b
+          ) =>
+            a.score -
+            b.score
+        )
+
+
+    const best =
+      ranked[0]
+
+
+    if (
+      !best
+    ) {
+
+      return {
+        elevation:
+          null,
+        mountainRange:
+          null,
+        latitude:
+          null,
+        longitude:
+          null,
+        name:
+          null
+      }
+
+    }
+
+
+    let mountainRange:
+      string | null =
+      null
+
+
+    const rangeIds =
+      getWikidataItemIds(
+        best.entity,
+        'P4552'
+      )
+
+
+    if (
+      rangeIds.length >
+      0
+    ) {
+
+      const rangeEntities =
+        await wikidataGetEntities(
+          rangeIds
+        )
+
+
+      mountainRange =
+        getWikidataLabel(
+          rangeEntities[0]
+        )
+
+    }
+
+
+    const bestCoordinates =
+      getWikidataCoordinates(
+        best.entity
+      )
+
+
+    return {
+
+      elevation:
+        best.elevation,
+
+      mountainRange,
+
+      latitude:
+        bestCoordinates.latitude,
+
+      longitude:
+        bestCoordinates.longitude,
+
+      name:
+        getWikidataLabel(
+          best.entity
+        )
+
+    }
+
+  }
+
+
+  // ===================================================
+  // CĂUTARE VÂRF DUPĂ NUME - PENTRU POZE FĂRĂ GPS
+  // ===================================================
+  //
+  // Nu schimbă deloc fluxul fotografiilor care AU GPS.
+  //
+  // Căutăm vârful în România după nume și încercăm să
+  // obținem coordonatele sale.
+  // ===================================================
+
+  async function searchPeakByName(
+
+    peakName: string
+
+  ): Promise<PeakInfo | null> {
+
+    try {
+
+      const cleanName =
+        peakName
+
+          .replace(
+            /^V[âa]rful\s+/i,
+            ''
+          )
+
+          .replace(
+            /^Vf\.?\s*/i,
+            ''
+          )
+
+          .trim()
+
+
+      const queries =
+        Array.from(
+          new Set([
+            `Vârful ${cleanName}`,
+            cleanName
+          ])
+        )
+
+
+      const allResults:
+        any[] =
+        []
+
+
+      for (
+        const query
+        of queries
+      ) {
+
+        const params =
+          new URLSearchParams({
+
+            q:
+              `${query}, România`,
+
+            format:
+              'jsonv2',
+
+            addressdetails:
+              '1',
+
+            extratags:
+              '1',
+
+            namedetails:
+              '1',
+
+            countrycodes:
+              'ro',
+
+            limit:
+              '10',
+
+            'accept-language':
+              'ro'
+
+          })
+
+
+        const response =
+          await fetchWithTimeout(
+
+            `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+
+            {},
+
+            LOOKUP_TIMEOUT
+
+          )
+
+
+        if (
+          !response.ok
+        ) {
+
+          continue
+
+        }
+
+
+        const data =
+          await response.json()
+
+
+        if (
+          Array.isArray(
+            data
+          )
+        ) {
+
+          allResults.push(
+            ...data
+          )
+
+        }
+
+      }
+
+
+      if (
+        allResults.length ===
+        0
+      ) {
+
+        return null
+
+      }
+
+
+      const normalizedRequested =
+        normalizePeakLookupName(
+          cleanName
+        )
+
+
+      const ranked =
+        allResults
+
+          .map(
+            (
+              item:
+                any,
+              index:
+                number
+            ) => {
+
+              const latitude =
+                Number.parseFloat(
+                  item.lat
+                )
+
+
+              const longitude =
+                Number.parseFloat(
+                  item.lon
+                )
+
+
+              if (
+                !Number.isFinite(
+                  latitude
+                )
+                ||
+                !Number.isFinite(
+                  longitude
+                )
+              ) {
+
+                return null
+
+              }
+
+
+              const detectedName =
+                item.name
+
+                ||
+
+                item.namedetails
+                  ?.name
+
+                ||
+
+                item.display_name
+                  ?.split(',')[0]
+
+                ||
+
+                cleanName
+
+
+              const normalizedDetected =
+                normalizePeakLookupName(
+                  detectedName
+                )
+
+
+              let score =
+                index
+
+
+              if (
+                normalizedDetected ===
+                normalizedRequested
+              ) {
+
+                score -=
+                  500
+
+              }
+
+              else if (
+                normalizedDetected.includes(
+                  normalizedRequested
+                )
+                ||
+                normalizedRequested.includes(
+                  normalizedDetected
+                )
+              ) {
+
+                score -=
+                  250
+
+              }
+
+
+              if (
+                item.type ===
+                'peak'
+              ) {
+
+                score -=
+                  700
+
+              }
+
+
+              if (
+                item.category ===
+                'natural'
+                ||
+                item.class ===
+                'natural'
+              ) {
+
+                score -=
+                  200
+
+              }
+
+
+              return {
+
+                score,
+
+                peak: {
+
+                  name:
+                    detectedName,
+
+                  elevation:
+                    parseElevation(
+                      item.extratags
+                        ?.ele
+                    ),
+
+                  latitude,
+
+                  longitude,
+
+                  distance:
+                    0,
+
+                  mountainRange:
+
+                    item.extratags
+                      ?.['is_in:mountains']
+
+                    ||
+
+                    item.extratags
+                      ?.['is_in:mountain_range']
+
+                    ||
+
+                    item.extratags
+                      ?.mountain_range
+
+                    ||
+
+                    null
+
+                } as PeakInfo
+
+              }
+
+            }
+          )
+
+          .filter(
+            Boolean
+          )
+
+          .sort(
+            (
+              a:
+                any,
+              b:
+                any
+            ) =>
+              a.score -
+              b.score
+          )
+
+
+      return (
+        ranked[0]
+          ?.peak
+        ??
+        null
+      )
+
+    }
+
+    catch (
+      error
+    ) {
+
+      console.log(
+        'Eroare căutare vârf după nume:',
+        error
+      )
+
+
+      return null
+
+    }
+
+  }
+
+
+  // ===================================================
+  // VÂRF MANUAL PENTRU POZĂ FĂRĂ GPS
+  // ===================================================
+
+  async function buildManualPeakFromName(
+
+    typedPeakName:
+      string
+
+  ): Promise<{
+    peak: PeakInfo
+    location: ReverseLocation
+  } | null> {
+
+    const cleanName =
+      typedPeakName
+        .trim()
+
+
+    if (
+      !cleanName
+    ) {
+
+      return null
+
+    }
+
+
+    setStatus(
+      `🔎 Caut ${cleanName}...`
+    )
+
+
+    /*
+      1. Încercăm Nominatim pentru coordonatele vârfului.
+    */
+
+    const nominatimPeak =
+      await searchPeakByName(
+        cleanName
+      )
+
+
+    /*
+      2. Wikidata este folosit pentru metadatele vârfului:
+         altitudine, masiv și, dacă este nevoie, coordonate.
+    */
+
+    const wikidata =
+      await getPeakMetadataFromWikidata(
+
+        cleanName,
+
+        nominatimPeak
+          ?.latitude
+        ??
+        null,
+
+        nominatimPeak
+          ?.longitude
+        ??
+        null
+
+      )
+
+
+    const latitude =
+
+      nominatimPeak
+        ?.latitude
+
+      ??
+
+      wikidata.latitude
+
+
+    const longitude =
+
+      nominatimPeak
+        ?.longitude
+
+      ??
+
+      wikidata.longitude
+
+
+    /*
+      Fără coordonate nu putem pune markerul pe hartă.
+    */
+
+    if (
+      latitude ===
+      null
+      ||
+      longitude ===
+      null
+      ||
+      !Number.isFinite(
+        latitude
+      )
+      ||
+      !Number.isFinite(
+        longitude
+      )
+    ) {
+
+      return null
+
+    }
+
+
+    /*
+      3. Folosim coordonatele vârfului pentru locația
+         administrativă / traseu, exact cum facem și
+         pentru fotografiile cu GPS.
+    */
+
+    const location =
+      await getReverseLocation(
+
+        latitude,
+
+        longitude
+
+      )
+
+
+    let elevation =
+
+      nominatimPeak
+        ?.elevation
+
+      ??
+
+      wikidata.elevation
+
+
+    /*
+      4. Dacă nici OSM/Nominatim, nici Wikidata nu au
+         altitudinea, folosim modelul digital de teren
+         la coordonatele EXACTE ale vârfului.
+    */
+
+    if (
+      elevation ===
+      null
+    ) {
+
+      elevation =
+        await getTerrainElevation(
+
+          latitude,
+
+          longitude
+
+        )
+
+    }
+
+
+    let mountainRange =
+
+      wikidata.mountainRange
+
+      ??
+
+      nominatimPeak
+        ?.mountainRange
+
+      ??
+
+      location.mountainRange
+
+      ??
+
+      null
+
+
+    if (
+      !mountainRange
+    ) {
+
+      mountainRange =
+        await getNearbyMountainRangeFromWikidata(
+
+          latitude,
+
+          longitude
+
+        )
+
+    }
+
+
+    const detectedName =
+
+      nominatimPeak
+        ?.name
+
+      ??
+
+      wikidata.name
+
+      ??
+
+      cleanName
+
+
+    return {
+
+      peak: {
+
+        name:
+          detectedName,
+
+        elevation,
+
+        latitude,
+
+        longitude,
+
+        distance:
+          0,
+
+        mountainRange
+
+      },
+
+      location
+
+    }
+
+  }
+
+
+  // ===================================================
+  // FALLBACK MASIV DUPĂ COORDONATE
+  // ===================================================
+  //
+  // Unele vârfuri sunt corect identificate în OSM, dar:
+  // - nu au tag is_in:mountains / mountain_range
+  // - iar itemul Wikidata al vârfului nu are P4552.
+  //
+  // În acest caz căutăm, DOAR ca fallback, entități
+  // geografice apropiate de coordonatele vârfului în
+  // Wikidata și preferăm etichete de tip:
+  // "Munții ...", "... Mountains", "Masivul ...", "... Massif".
+  //
+  // Nu există nicio excepție hardcodată pentru Țuțuiatu
+  // sau pentru alt vârf.
+  // ===================================================
+
+  async function getNearbyMountainRangeFromWikidata(
 
     latitude: number,
 
     longitude: number
 
-  ): Promise<PeakInfo[]> {
+  ): Promise<string | null> {
+
+    if (
+      !Number.isFinite(
+        latitude
+      )
+      ||
+      !Number.isFinite(
+        longitude
+      )
+    ) {
+
+      return null
+
+    }
+
+
+    try {
+
+      const sparql = `
+SELECT ?item ?itemLabel ?distance WHERE {
+
+  SERVICE wikibase:around {
+
+    ?item wdt:P625 ?location .
+
+    bd:serviceParam
+      wikibase:center
+      "Point(${longitude} ${latitude})"^^geo:wktLiteral .
+
+    bd:serviceParam
+      wikibase:radius
+      "80" .
+
+    bd:serviceParam
+      wikibase:distance
+      ?distance .
+
+  }
+
+  SERVICE wikibase:label {
+
+    bd:serviceParam
+      wikibase:language
+      "ro,en" .
+
+    ?item
+      rdfs:label
+      ?itemLabel .
+
+  }
+
+  FILTER(
+    REGEX(
+      LCASE(
+        STR(
+          ?itemLabel
+        )
+      ),
+      "munții|muntii|mountains|mountain range|masiv|massif"
+    )
+  )
+
+}
+ORDER BY ASC(?distance)
+LIMIT 25
+      `
+
+
+      const params =
+        new URLSearchParams({
+
+          query:
+            sparql,
+
+          format:
+            'json'
+
+        })
+
+
+      const response =
+        await fetchWithTimeout(
+
+          `https://query.wikidata.org/sparql?${params.toString()}`,
+
+          {
+
+            headers: {
+
+              Accept:
+                'application/sparql-results+json'
+
+            }
+
+          },
+
+          12000
+
+        )
+
+
+      if (
+        !response.ok
+      ) {
+
+        return null
+
+      }
+
+
+      const data =
+        await response.json()
+
+
+      const bindings =
+        data
+          ?.results
+          ?.bindings
+
+
+      if (
+        !Array.isArray(
+          bindings
+        )
+        ||
+        bindings.length ===
+        0
+      ) {
+
+        return null
+
+      }
+
+
+      const candidates =
+        bindings
+
+          .map(
+            (
+              binding:
+                any
+            ) => {
+
+              const label =
+                String(
+                  binding
+                    ?.itemLabel
+                    ?.value
+                  ??
+                  ''
+                )
+                  .trim()
+
+
+              const distance =
+                Number(
+                  binding
+                    ?.distance
+                    ?.value
+                )
+
+
+              if (
+                !label
+              ) {
+
+                return null
+
+              }
+
+
+              const normalized =
+                label
+
+                  .toLowerCase()
+
+                  .normalize(
+                    'NFD'
+                  )
+
+                  .replace(
+                    /[\u0300-\u036f]/g,
+                    ''
+                  )
+
+
+              let score =
+                Number.isFinite(
+                  distance
+                )
+
+                  ? distance
+
+                  : 999
+
+
+              /*
+                Preferăm denumiri care arată clar că
+                obiectul este un masiv / lanț montan.
+              */
+
+              if (
+                normalized.includes(
+                  'muntii'
+                )
+                ||
+                normalized.includes(
+                  'mountains'
+                )
+              ) {
+
+                score -=
+                  30
+
+              }
+
+
+              if (
+                normalized.includes(
+                  'masiv'
+                )
+                ||
+                normalized.includes(
+                  'massif'
+                )
+                ||
+                normalized.includes(
+                  'mountain range'
+                )
+              ) {
+
+                score -=
+                  20
+
+              }
+
+
+              /*
+                Evităm, când există o alternativă mai bună,
+                denumiri care sunt explicit parcuri.
+              */
+
+              if (
+                normalized.includes(
+                  'national park'
+                )
+                ||
+                normalized.includes(
+                  'parcul national'
+                )
+              ) {
+
+                score +=
+                  25
+
+              }
+
+
+              return {
+
+                label,
+
+                score
+
+              }
+
+            }
+          )
+
+          .filter(
+            Boolean
+          )
+
+          .sort(
+            (
+              a:
+                any,
+              b:
+                any
+            ) =>
+              a.score -
+              b.score
+          )
+
+
+      return (
+        candidates[0]
+          ?.label
+        ??
+        null
+      )
+
+    }
+
+    catch (
+      error
+    ) {
+
+      console.log(
+        'Eroare fallback masiv Wikidata:',
+        error
+      )
+
+
+      return null
+
+    }
+
+  }
+
+
+  // ===================================================
+  // FALLBACK ALTITUDINE DIN TEREN
+  // ===================================================
+  //
+  // Dacă OSM și Wikidata nu au altitudinea, folosim
+  // coordonatele EXACTE ale vârfului, nu ale fotografiei.
+  // ===================================================
+
+  async function getTerrainElevation(
+
+    latitude: number,
+
+    longitude: number
+
+  ): Promise<number | null> {
+
+    try {
+
+      const url =
+
+        `https://api.open-meteo.com/v1/elevation`
+
+        +
+
+        `?latitude=${encodeURIComponent(
+          latitude
+        )}`
+
+        +
+
+        `&longitude=${encodeURIComponent(
+          longitude
+        )}`
+
+
+      const response =
+        await fetchWithTimeout(
+
+          url,
+
+          {},
+
+          LOOKUP_TIMEOUT
+
+        )
+
+
+      if (
+        !response.ok
+      ) {
+
+        return null
+
+      }
+
+
+      const data =
+        await response.json()
+
+
+      const value =
+        Array.isArray(
+          data.elevation
+        )
+
+          ? data.elevation[0]
+
+          : null
+
+
+      return parseElevation(
+        value
+      )
+
+    }
+
+    catch (
+      error
+    ) {
+
+      console.log(
+        'Eroare altitudine teren:',
+        error
+      )
+
+
+      return null
+
+    }
+
+  }
+
+
+  // ===================================================
+  // COMPLETĂM DOAR METADATELE VÂRFULUI
+  // ===================================================
+
+  async function enrichPeakMetadata(
+    peak: PeakInfo
+  ): Promise<PeakInfo> {
+
+    if (
+      peak.elevation !==
+      null
+      &&
+      peak.mountainRange
+    ) {
+
+      return peak
+
+    }
+
+
+    const wikidata =
+      await getPeakMetadataFromWikidata(
+
+        peak.name,
+
+        peak.latitude,
+
+        peak.longitude
+
+      )
+
+
+    let elevation =
+
+      peak.elevation
+      ??
+      wikidata.elevation
+
+
+    let mountainRange =
+
+      peak.mountainRange
+      ??
+      wikidata.mountainRange
+
+
+    /*
+      Dacă OSM și relația directă din Wikidata nu spun
+      masivul, îl căutăm generic după coordonatele vârfului.
+      Celelalte vârfuri care au deja masivul NU sunt afectate.
+    */
+
+    if (
+      !mountainRange
+    ) {
+
+      mountainRange =
+        await getNearbyMountainRangeFromWikidata(
+
+          peak.latitude,
+
+          peak.longitude
+
+        )
+
+    }
+
+
+    if (
+      elevation ===
+      null
+    ) {
+
+      elevation =
+        await getTerrainElevation(
+
+          peak.latitude,
+
+          peak.longitude
+
+        )
+
+    }
+
+
+    return {
+
+      ...peak,
+
+      elevation,
+
+      mountainRange
+
+    }
+
+  }
+
+
+  // ===================================================
+  // CĂUTARE VÂRF
+  // ===================================================
+
+  async function getNearbyPeak(
+
+    latitude: number,
+
+    longitude: number
+
+  ): Promise<PeakInfo | null> {
 
     const query = `
 
-      [out:json][timeout:10];
+      [out:json][timeout:8];
 
       node(
         around:${PEAK_SEARCH_RADIUS},
@@ -2711,9 +3969,10 @@ function App() {
 
 
         if (
-          !Array.isArray(
-            data.elements
-          )
+          !data.elements
+          ||
+          data.elements.length ===
+          0
         ) {
 
           continue
@@ -2721,9 +3980,9 @@ function App() {
         }
 
 
-        const peaks:
-          PeakInfo[] =
-          []
+        let nearestPeak:
+          PeakInfo | null =
+          null
 
 
         for (
@@ -2758,57 +4017,22 @@ function App() {
             )
 
 
-          if (
-            distance >
-            PEAK_CONFIRM_DISTANCE
-          ) {
+          const peak:
+            PeakInfo = {
 
-            continue
+            name:
 
-          }
+              element.tags
+                ?.['name:ro']
 
+              ||
 
-          const name =
+              element.tags
+                ?.name
 
-            element.tags
-              ?.['name:ro']
+              ||
 
-            ||
-
-            element.tags
-              ?.name
-
-            ||
-
-            element.tags
-              ?.alt_name
-
-            ||
-
-            'Vârf fără nume'
-
-
-          /*
-            Pentru lista de alegere preferăm
-            vârfurile care au un nume.
-          */
-
-          if (
-            name ===
-            'Vârf fără nume'
-            &&
-            distance >
-            PEAK_AUTO_ACCEPT_DISTANCE
-          ) {
-
-            continue
-
-          }
-
-
-          peaks.push({
-
-            name,
+              'Vârf fără nume',
 
             elevation:
 
@@ -2843,35 +4067,38 @@ function App() {
 
               null
 
-          })
+          }
+
+
+          if (
+            !nearestPeak
+            ||
+            peak.distance <
+            nearestPeak.distance
+          ) {
+
+            nearestPeak =
+              peak
+
+          }
 
         }
 
 
-        peaks.sort(
-          (
-            a,
-            b
-          ) =>
-            a.distance -
-            b.distance
-        )
-
-
         /*
-          Dacă primul server a răspuns și a găsit
-          vârfuri, nu mai așteptăm al doilea server.
+          Returnăm cel mai apropiat vârf din raza de
+          1500 m. Decizia finală dacă fotografia este
+          "pe vârf" se face în handlePhoto().
         */
 
         if (
-          peaks.length >
-          0
+          nearestPeak
+          &&
+          nearestPeak.distance <=
+          PEAK_CONFIRM_DISTANCE
         ) {
 
-          return peaks.slice(
-            0,
-            MAX_PEAK_CANDIDATES
-          )
+          return nearestPeak
 
         }
 
@@ -2900,17 +4127,16 @@ function App() {
     ) {
 
       console.log(
-        'Nu am putut interoga serverele Overpass.',
+        'Nu am putut interoga niciun server Overpass.',
         lastError
       )
 
     }
 
 
-    return []
+    return null
 
   }
-
 
   // ===================================================
   // NOMINATIM SPUNE CĂ ESTE VÂRF
@@ -3014,7 +4240,293 @@ function App() {
 
 
   // ===================================================
-  // ALEGERE TIP LOCAȚIE
+  // CĂUTARE DESTINAȚIE DUPĂ NUME - POZĂ FĂRĂ GPS
+  // ===================================================
+  //
+  // Dacă fotografia nu are coordonate și utilizatorul
+  // alege "Altă destinație", cerem numele locului și
+  // căutăm coordonatele lui în Nominatim.
+  //
+  // Exemplu:
+  // Lacul Bâlea
+  // Cabana Curmătura
+  // Cascada Cailor
+  // ===================================================
+
+  async function searchPlaceByName(
+
+    placeName:
+      string
+
+  ): Promise<{
+    name: string
+    displayName: string
+    latitude: number
+    longitude: number
+  } | null> {
+
+    const cleanName =
+      placeName
+        .trim()
+
+
+    if (
+      !cleanName
+    ) {
+
+      return null
+
+    }
+
+
+    try {
+
+      const params =
+        new URLSearchParams({
+
+          q:
+            `${cleanName}, România`,
+
+          format:
+            'jsonv2',
+
+          addressdetails:
+            '1',
+
+          namedetails:
+            '1',
+
+          extratags:
+            '1',
+
+          countrycodes:
+            'ro',
+
+          limit:
+            '10',
+
+          'accept-language':
+            'ro'
+
+        })
+
+
+      const response =
+        await fetchWithTimeout(
+
+          `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+
+          {},
+
+          LOOKUP_TIMEOUT
+
+        )
+
+
+      if (
+        !response.ok
+      ) {
+
+        return null
+
+      }
+
+
+      const data =
+        await response.json()
+
+
+      if (
+        !Array.isArray(
+          data
+        )
+        ||
+        data.length ===
+        0
+      ) {
+
+        return null
+
+      }
+
+
+      const normalizedRequested =
+        normalizeSearchText(
+          cleanName
+        )
+
+
+      const ranked =
+        data
+
+          .map(
+            (
+              item:
+                any,
+              index:
+                number
+            ) => {
+
+              const latitude =
+                Number.parseFloat(
+                  item.lat
+                )
+
+
+              const longitude =
+                Number.parseFloat(
+                  item.lon
+                )
+
+
+              if (
+                !Number.isFinite(
+                  latitude
+                )
+                ||
+                !Number.isFinite(
+                  longitude
+                )
+              ) {
+
+                return null
+
+              }
+
+
+              const detectedName =
+
+                item.name
+
+                ||
+
+                item.namedetails
+                  ?.name
+
+                ||
+
+                item.display_name
+                  ?.split(',')[0]
+
+                ||
+
+                cleanName
+
+
+              const normalizedDetected =
+                normalizeSearchText(
+                  detectedName
+                )
+
+
+              let score =
+                index
+
+
+              if (
+                normalizedDetected ===
+                normalizedRequested
+              ) {
+
+                score -=
+                  500
+
+              }
+
+              else if (
+                normalizedDetected.includes(
+                  normalizedRequested
+                )
+                ||
+                normalizedRequested.includes(
+                  normalizedDetected
+                )
+              ) {
+
+                score -=
+                  250
+
+              }
+
+
+              return {
+
+                score,
+
+                result: {
+
+                  name:
+                    detectedName,
+
+                  displayName:
+                    item.display_name
+                    ||
+                    detectedName,
+
+                  latitude,
+
+                  longitude
+
+                }
+
+              }
+
+            }
+          )
+
+          .filter(
+            Boolean
+          )
+
+          .sort(
+            (
+              a:
+                any,
+              b:
+                any
+            ) =>
+              a.score -
+              b.score
+          )
+
+
+      return (
+        ranked[0]
+          ?.result
+        ??
+        null
+      )
+
+    }
+
+    catch (
+      error
+    ) {
+
+      console.log(
+        'Eroare căutare destinație după nume:',
+        error
+      )
+
+
+      return null
+
+    }
+
+  }
+
+
+  // ===================================================
+  // ALEGERE: VÂRF SAU ALTĂ DESTINAȚIE
+  // ===================================================
+  //
+  // Pentru fotografiile CU GPS păstrăm alegerea explicită:
+  // 🏔️ Vârf
+  // 📍 Altă destinație
+  //
+  // Astfel o fotografie făcută lângă un vârf nu este
+  // clasificată automat ca vârf dacă utilizatorul vrea
+  // să salveze doar traseul, lacul, cabana etc.
   // ===================================================
 
   function askLocationType() {
@@ -3022,7 +4534,9 @@ function App() {
     return new Promise<
       LocationTypeChoice
     >(
-      (resolve) => {
+      (
+        resolve
+      ) => {
 
         locationTypeResolverRef.current =
           resolve
@@ -3039,7 +4553,8 @@ function App() {
 
 
   function resolveLocationType(
-    choice: LocationTypeChoice
+    choice:
+      LocationTypeChoice
   ) {
 
     setLocationTypeModalOpen(
@@ -3090,20 +4605,571 @@ function App() {
 
       if (!gps) {
 
-        alert(
-          'Fotografia nu conține coordonate GPS.'
+        setStatus(
+          '📍 Fotografia nu are GPS — alege tipul locației.'
         )
 
 
+        /*
+          IMPORTANT:
+          Folosim EXACT aceeași fereastră ca pentru pozele cu GPS:
+          🏔️ Este un vârf
+          📍 Altă destinație
+        */
+
+        const locationType =
+          await askLocationType()
+
+
+        if (
+          locationType ===
+          null
+        ) {
+
+          setStatus(
+            ''
+          )
+
+
+          return
+
+        }
+
+
+        // =================================================
+        // POZĂ FĂRĂ GPS + VÂRF
+        // =================================================
+
+        if (
+          locationType ===
+          'peak'
+        ) {
+
+          const typedPeakName =
+            window.prompt(
+
+`Fotografia nu are coordonate GPS.
+
+Scrie numele vârfului.
+
+Exemple:
+Omu
+Negoiu
+Țuțuiatu
+Vânătarea lui Buteanu`
+
+            )
+
+
+          if (
+            typedPeakName ===
+            null
+            ||
+            !typedPeakName
+              .trim()
+          ) {
+
+            setStatus(
+              ''
+            )
+
+
+            return
+
+          }
+
+
+          const manualResult =
+            await buildManualPeakFromName(
+
+              typedPeakName
+
+            )
+
+
+          if (
+            !manualResult
+          ) {
+
+            alert(
+              'Nu am putut identifica automat acest vârf. Verifică numele și încearcă din nou.'
+            )
+
+
+            setStatus(
+              ''
+            )
+
+
+            return
+
+          }
+
+
+          const manualPeak =
+            manualResult.peak
+
+
+          const manualLocation =
+            manualResult.location
+
+
+          const manualLocationDetails =
+            manualLocation.displayName
+
+
+          const manualMountainRange =
+            manualPeak.mountainRange
+            ??
+            manualLocation.mountainRange
+            ??
+            null
+
+
+          const manualInfo =
+`🏔️ VÂRF IDENTIFICAT
+
+${manualPeak.name}
+
+Altitudine:
+${
+  manualPeak.elevation !== null
+    ? `${manualPeak.elevation} m`
+    : 'necunoscută'
+}
+
+Masiv:
+${
+  manualMountainRange
+  ||
+  'nedetectat automat'
+}
+
+📍 Locație:
+${manualLocationDetails}
+
+Coordonatele markerului:
+${manualPeak.latitude.toFixed(6)},
+${manualPeak.longitude.toFixed(6)}
+
+Fotografia nu are GPS, deci markerul va fi pus
+la coordonatele vârfului identificat.`
+
+
+          const description =
+            window.prompt(
+
+`${manualInfo}
+
+Scrie o descriere pentru această fotografie:`
+
+            )
+
+
+          if (
+            description ===
+            null
+          ) {
+
+            return
+
+          }
+
+
+          if (
+            !user
+          ) {
+
+            return
+
+          }
+
+
+          setStatus(
+            '📷 Salvez fotografia...'
+          )
+
+
+          const imagePath =
+            await uploadVisitPhoto(
+              file
+            )
+
+
+          if (
+            !imagePath
+          ) {
+
+            return
+
+          }
+
+
+          setStatus(
+            '💾 Salvez vârful...'
+          )
+
+
+          const {
+            error
+          } =
+            await supabase
+
+              .from(
+                'visits'
+              )
+
+              .insert({
+
+                user_id:
+                  user.id,
+
+                latitude:
+                  manualPeak.latitude,
+
+                longitude:
+                  manualPeak.longitude,
+
+                place_name:
+                  manualPeak.name,
+
+                location_details:
+                  manualLocationDetails,
+
+                is_peak:
+                  true,
+
+                peak_elevation:
+                  manualPeak.elevation,
+
+                mountain_range:
+                  manualMountainRange,
+
+                description,
+
+                image_path:
+                  imagePath,
+
+                visit_date:
+
+                  new Date()
+
+                    .toISOString()
+
+                    .split('T')[0]
+
+              })
+
+
+          if (
+            error
+          ) {
+
+            console.log(
+              'Eroare Supabase:',
+              error
+            )
+
+
+            await supabase
+
+              .storage
+
+              .from(
+                PHOTO_BUCKET
+              )
+
+              .remove([
+                imagePath
+              ])
+
+
+            alert(
+              'Vârful nu a putut fi salvat.'
+            )
+
+
+            return
+
+          }
+
+
+          await getVisits()
+
+
+          setStatus(
+            `✅ ${manualPeak.name} a fost adăugat 🏔️`
+          )
+
+
+          alert(
+            `Vârful ${manualPeak.name} a fost adăugat! 🏔️`
+          )
+
+
+          return
+
+        }
+
+
+        // =================================================
+        // POZĂ FĂRĂ GPS + ALTĂ DESTINAȚIE
+        // =================================================
+
+        const typedPlaceName =
+          window.prompt(
+
+`Fotografia nu are coordonate GPS.
+
+Scrie numele destinației.
+
+Exemple:
+Lacul Bâlea
+Cabana Curmătura
+Cascada Cailor`
+
+          )
+
+
+        if (
+          typedPlaceName ===
+          null
+          ||
+          !typedPlaceName
+            .trim()
+        ) {
+
+          setStatus(
+            ''
+          )
+
+
+          return
+
+        }
+
+
         setStatus(
-          ''
+          `🔎 Caut ${typedPlaceName.trim()}...`
+        )
+
+
+        const manualPlace =
+          await searchPlaceByName(
+
+            typedPlaceName
+
+          )
+
+
+        if (
+          !manualPlace
+        ) {
+
+          alert(
+            'Nu am putut identifica această destinație. Încearcă să scrii un nume mai exact.'
+          )
+
+
+          setStatus(
+            ''
+          )
+
+
+          return
+
+        }
+
+
+        const confirmedPlace =
+          window.confirm(
+
+`📍 Am găsit:
+
+${manualPlace.displayName}
+
+Coordonate:
+${manualPlace.latitude.toFixed(6)},
+${manualPlace.longitude.toFixed(6)}
+
+Este aceasta destinația corectă?`
+
+          )
+
+
+        if (
+          !confirmedPlace
+        ) {
+
+          setStatus(
+            ''
+          )
+
+
+          return
+
+        }
+
+
+        const description =
+          window.prompt(
+
+`📍 DESTINAȚIE IDENTIFICATĂ
+
+${manualPlace.displayName}
+
+Fotografia nu are GPS, deci markerul va fi pus
+la coordonatele destinației găsite.
+
+Scrie o descriere pentru această fotografie:`
+
+          )
+
+
+        if (
+          description ===
+          null
+        ) {
+
+          return
+
+        }
+
+
+        if (
+          !user
+        ) {
+
+          return
+
+        }
+
+
+        setStatus(
+          '📷 Salvez fotografia...'
+        )
+
+
+        const imagePath =
+          await uploadVisitPhoto(
+            file
+          )
+
+
+        if (
+          !imagePath
+        ) {
+
+          return
+
+        }
+
+
+        setStatus(
+          '💾 Salvez destinația...'
+        )
+
+
+        const {
+          error
+        } =
+          await supabase
+
+            .from(
+              'visits'
+            )
+
+            .insert({
+
+              user_id:
+                user.id,
+
+              latitude:
+                manualPlace.latitude,
+
+              longitude:
+                manualPlace.longitude,
+
+              place_name:
+                manualPlace.name,
+
+              location_details:
+                manualPlace.displayName,
+
+              is_peak:
+                false,
+
+              peak_elevation:
+                null,
+
+              mountain_range:
+                null,
+
+              description,
+
+              image_path:
+                imagePath,
+
+              visit_date:
+
+                new Date()
+
+                  .toISOString()
+
+                  .split('T')[0]
+
+            })
+
+
+        if (
+          error
+        ) {
+
+          console.log(
+            'Eroare Supabase:',
+            error
+          )
+
+
+          await supabase
+
+            .storage
+
+            .from(
+              PHOTO_BUCKET
+            )
+
+            .remove([
+              imagePath
+            ])
+
+
+          alert(
+            'Destinația nu a putut fi salvată.'
+          )
+
+
+          return
+
+        }
+
+
+        await getVisits()
+
+
+        setStatus(
+          `✅ ${manualPlace.name} a fost adăugată 📍`
+        )
+
+
+        alert(
+          `${manualPlace.name} a fost adăugată pe hartă! 📍`
         )
 
 
         return
 
       }
-
 
       const latitude =
         gps.latitude
@@ -3134,7 +5200,7 @@ function App() {
 
       const [
         location,
-        overpassPeaks
+        overpassPeak
       ] =
         await Promise.all([
 
@@ -3143,7 +5209,7 @@ function App() {
             longitude
           ),
 
-          getNearbyPeaks(
+          getNearbyPeak(
             latitude,
             longitude
           )
@@ -3163,110 +5229,8 @@ function App() {
         )
 
 
-      /*
-        Reunim rezultatul Nominatim cu vârfurile
-        găsite de Overpass și eliminăm duplicatele.
-      */
-
-      const allCandidates:
-        PeakInfo[] =
-        [
-
-          ...(
-            nominatimPeak
-              ? [
-                  nominatimPeak
-                ]
-              : []
-          ),
-
-          ...overpassPeaks
-
-        ]
-
-
-      const uniqueCandidates =
-        new Map<
-          string,
-          PeakInfo
-        >()
-
-
-      for (
-        const candidate
-        of allCandidates
-      ) {
-
-        const key =
-          candidate.name
-
-            .toLowerCase()
-
-            .normalize(
-              'NFD'
-            )
-
-            .replace(
-              /[\u0300-\u036f]/g,
-              ''
-            )
-
-            .replace(
-              /[^a-z0-9]/g,
-              ''
-            )
-
-
-        const existing =
-          uniqueCandidates.get(
-            key
-          )
-
-
-        if (
-          !existing
-          ||
-          candidate.distance <
-          existing.distance
-        ) {
-
-          uniqueCandidates.set(
-            key,
-            candidate
-          )
-
-        }
-
-      }
-
-
-      const peakCandidates =
-        Array.from(
-          uniqueCandidates.values()
-        )
-
-          .sort(
-            (
-              a,
-              b
-            ) =>
-              a.distance -
-              b.distance
-          )
-
-          .slice(
-            0,
-            MAX_PEAK_CANDIDATES
-          )
-
-
-      let peak:
-        PeakInfo | null =
-        null
-
-
       // =================================================
-      // UTILIZATORUL ALEGE CLAR TIPUL LOCAȚIEI
+      // UTILIZATORUL ALEGE TIPUL LOCAȚIEI
       // =================================================
 
       const locationType =
@@ -3274,8 +5238,7 @@ function App() {
 
 
       /*
-        Dacă apasă X în fereastră,
-        anulăm adăugarea fotografiei.
+        X = anulăm adăugarea fotografiei.
       */
 
       if (
@@ -3293,8 +5256,13 @@ function App() {
       }
 
 
+      let peak:
+        PeakInfo | null =
+        null
+
+
       // =================================================
-      // DACĂ ESTE VÂRF, CEREM NUMELE
+      // DACĂ A ALES VÂRF
       // =================================================
 
       if (
@@ -3302,297 +5270,224 @@ function App() {
         'peak'
       ) {
 
-        const candidateLines =
-          peakCandidates
-
-            .map(
-              (
-                candidate,
-                index
-              ) => {
-
-                const distanceText =
-
-                  candidate.distance >=
-                  1000
-
-                    ? `${
-                        (
-                          candidate.distance /
-                          1000
-                        )
-                          .toFixed(1)
-                      } km`
-
-                    : `${
-                        Math.round(
-                          candidate.distance
-                        )
-                      } m`
-
-
-                const elevationText =
-
-                  candidate.elevation !==
-                  null
-
-                    ? ` — ${candidate.elevation} m`
-
-                    : ''
-
-
-                return (
-                  `${
-                    index + 1
-                  }. ${
-                    candidate.name
-                  } — ${
-                    distanceText
-                  }${
-                    elevationText
-                  }`
-                )
-
-              }
-            )
-
-            .join(
-              '\n'
-            )
-
-
-        const suggestedPeakName =
-          peakCandidates[0]
-            ?.name
+        peak =
+          nominatimPeak
           ??
-          ''
-
-
-        const peakNameInput =
-          window.prompt(
-
-`🏔️ Numele vârfului
-
-${
-  candidateLines
-    ? `Vârfuri găsite în apropiere:\n\n${candidateLines}\n\n`
-    : ''
-}Scrie numele vârfului pe care l-ai vizitat.
-
-Exemplu:
-Omu`,
-
-            suggestedPeakName
-
-          )
+          overpassPeak
 
 
         /*
-          Cancel = anulăm complet adăugarea.
+          Dacă serviciile automate nu găsesc vârful,
+          îi permitem să scrie numele.
+
+          IMPORTANT:
+          markerul salvat rămâne la coordonatele GPS
+          ale fotografiei. Numele introdus este folosit
+          doar pentru identificarea vârfului și metadate.
         */
 
         if (
-          peakNameInput ===
-          null
+          !peak
         ) {
 
-          setStatus(
-            ''
-          )
+          const typedPeakName =
+            window.prompt(
+
+`🏔️ Nu am identificat automat un vârf suficient de aproape.
+
+Scrie numele vârfului pe care l-ai vizitat.
+
+Exemple:
+Omu
+Negoiu
+Țuțuiatu
+Vânătarea lui Buteanu`
+
+            )
 
 
-          return
+          if (
+            typedPeakName ===
+            null
+            ||
+            !typedPeakName
+              .trim()
+          ) {
 
-        }
-
-
-        const selectedPeakName =
-          peakNameInput
-            .trim()
-
-
-        if (
-          !selectedPeakName
-        ) {
-
-          alert(
-            'Scrie numele vârfului.'
-          )
+            setStatus(
+              ''
+            )
 
 
-          setStatus(
-            ''
-          )
+            return
+
+          }
 
 
-          return
+          const manualResult =
+            await buildManualPeakFromName(
 
-        }
+              typedPeakName
 
-
-        const normalizePeakChoice =
-          (
-            value: string
-          ) =>
-
-            value
-
-              .toLowerCase()
-
-              .normalize(
-                'NFD'
-              )
-
-              .replace(
-                /[\u0300-\u036f]/g,
-                ''
-              )
-
-              .replace(
-                /^varful\s+/,
-                ''
-              )
-
-              .replace(
-                /^vf\.?\s+/,
-                ''
-              )
-
-              .replace(
-                /[^a-z0-9]/g,
-                ''
-              )
+            )
 
 
-        const normalizedSelectedName =
-          normalizePeakChoice(
-            selectedPeakName
-          )
+          if (
+            !manualResult
+          ) {
+
+            alert(
+              'Nu am putut identifica automat acest vârf. Verifică numele și încearcă din nou.'
+            )
 
 
-        const matchedCandidate =
-          peakCandidates.find(
-            (
-              candidate
-            ) =>
-
-              normalizePeakChoice(
-                candidate.name
-              )
-              ===
-              normalizedSelectedName
-          )
+            setStatus(
+              ''
+            )
 
 
-        setStatus(
-          `🔎 Caut altitudinea și masivul pentru ${selectedPeakName}...`
-        )
+            return
 
+          }
 
-        const wikidataMetadata =
-          await getPeakMetadataByName(
-
-            selectedPeakName,
-
-            latitude,
-
-            longitude
-
-          )
-
-
-        if (
-          matchedCandidate
-        ) {
 
           peak = {
 
-            ...matchedCandidate,
+            ...manualResult.peak,
 
-            elevation:
+            distance:
+              calculateDistance(
 
-              matchedCandidate.elevation
-              ??
-              wikidataMetadata.elevation,
+                latitude,
 
-            mountainRange:
+                longitude,
 
-              matchedCandidate.mountainRange
-              ??
-              wikidataMetadata.mountainRange
+                manualResult
+                  .peak
+                  .latitude,
+
+                manualResult
+                  .peak
+                  .longitude
+
+              )
 
           }
 
         }
 
-        else {
 
-          /*
-            Dacă vârful a fost scris manual, nu îl mai
-            salvăm direct cu altitudine NULL.
+        /*
+          Dacă vârful automat găsit este mai departe,
+          confirmăm că este chiar cel dorit.
+        */
 
-            Încercăm mai întâi să luăm altitudinea reală
-            și masivul din Wikidata.
-          */
+        if (
+          peak
+          &&
+          peak.distance >
+          PEAK_AUTO_ACCEPT_DISTANCE
+          &&
+          peak.distance <=
+          PEAK_CONFIRM_DISTANCE
+        ) {
 
-          const peakLatitude =
+          const confirmedPeak =
+            window.confirm(
 
-            wikidataMetadata.latitude
-            ??
-            latitude
+`🏔️ Am găsit:
+
+${peak.name}
+
+Distanță față de fotografia ta:
+${Math.round(
+  peak.distance
+)} m
+
+Este acesta vârful pe care l-ai vizitat?`
+
+            )
 
 
-          const peakLongitude =
+          if (
+            !confirmedPeak
+          ) {
 
-            wikidataMetadata.longitude
-            ??
-            longitude
+            const typedPeakName =
+              window.prompt(
+
+`Scrie numele corect al vârfului.`
+
+              )
 
 
-          const distanceToPeak =
+            if (
+              typedPeakName ===
+              null
+              ||
+              !typedPeakName
+                .trim()
+            ) {
 
-            wikidataMetadata.latitude !==
-            null
+              setStatus(
+                ''
+              )
 
-            &&
 
-            wikidataMetadata.longitude !==
-            null
+              return
 
-              ? calculateDistance(
+            }
+
+
+            const manualResult =
+              await buildManualPeakFromName(
+
+                typedPeakName
+
+              )
+
+
+            if (
+              !manualResult
+            ) {
+
+              alert(
+                'Nu am putut identifica automat acest vârf.'
+              )
+
+
+              setStatus(
+                ''
+              )
+
+
+              return
+
+            }
+
+
+            peak = {
+
+              ...manualResult.peak,
+
+              distance:
+                calculateDistance(
 
                   latitude,
 
                   longitude,
 
-                  peakLatitude,
+                  manualResult
+                    .peak
+                    .latitude,
 
-                  peakLongitude
+                  manualResult
+                    .peak
+                    .longitude
 
                 )
 
-              : 0
-
-
-          peak = {
-
-            name:
-              selectedPeakName,
-
-            elevation:
-              wikidataMetadata.elevation,
-
-            latitude:
-              peakLatitude,
-
-            longitude:
-              peakLongitude,
-
-            distance:
-              distanceToPeak,
-
-            mountainRange:
-              wikidataMetadata.mountainRange
+            }
 
           }
 
@@ -3601,17 +5496,36 @@ Omu`,
       }
 
 
-      // =================================================
-      // DACĂ ESTE LOCAȚIE NORMALĂ
-      // =================================================
+      /*
+        Dacă locationType === 'place':
+        peak rămâne null.
+
+        Astfel se salvează:
+        is_peak = false
+
+        și va apărea markerul albastru pentru destinație.
+      */
+
+
+      /*
+        Dacă vârful a fost deja identificat corect, completăm
+        numai altitudinea și masivul. Locația/traseul rămâne
+        exact rezultatul Nominatim existent.
+      */
 
       if (
-        locationType ===
-        'normal'
+        peak
       ) {
 
+        setStatus(
+          `🔎 Completez datele pentru ${peak.name}...`
+        )
+
+
         peak =
-          null
+          await enrichPeakMetadata(
+            peak
+          )
 
       }
 
@@ -4659,125 +6573,6 @@ Scrie o descriere pentru acest loc:`
 
 
       {/* =================================================
-          ALEGERE TIP LOCAȚIE
-      ================================================= */}
-
-      {
-        locationTypeModalOpen
-        &&
-        (
-
-          <div
-            className="location-type-overlay"
-            onClick={() =>
-              resolveLocationType(
-                null
-              )
-            }
-          >
-
-            <div
-              className="location-type-modal"
-              onClick={(event) =>
-                event.stopPropagation()
-              }
-            >
-
-              <button
-                className="location-type-close"
-                type="button"
-                title="Anulează"
-                onClick={() =>
-                  resolveLocationType(
-                    null
-                  )
-                }
-              >
-                ×
-              </button>
-
-
-              <div className="location-type-icon">
-                📍
-              </div>
-
-
-              <h2>
-                Ce tip de locație ai vizitat?
-              </h2>
-
-
-              <p>
-                Alege dacă fotografia reprezintă un vârf montan sau o locație normală de pe traseu.
-              </p>
-
-
-              <div className="location-type-actions">
-
-                <button
-                  className="location-type-option peak"
-                  type="button"
-                  onClick={() =>
-                    resolveLocationType(
-                      'peak'
-                    )
-                  }
-                >
-
-                  <span className="location-type-option-icon">
-                    🏔️
-                  </span>
-
-                  <span>
-                    <strong>
-                      Este un vârf
-                    </strong>
-
-                    <small>
-                      Va apărea și în statisticile pentru vârfuri.
-                    </small>
-                  </span>
-
-                </button>
-
-
-                <button
-                  className="location-type-option normal"
-                  type="button"
-                  onClick={() =>
-                    resolveLocationType(
-                      'normal'
-                    )
-                  }
-                >
-
-                  <span className="location-type-option-icon">
-                    📍
-                  </span>
-
-                  <span>
-                    <strong>
-                      Locație normală
-                    </strong>
-
-                    <small>
-                      Cabana, lac, traseu, punct de belvedere etc.
-                    </small>
-                  </span>
-
-                </button>
-
-              </div>
-
-            </div>
-
-          </div>
-
-        )
-      }
-
-
-      {/* =================================================
           HARTA
       ================================================= */}
 
@@ -5453,85 +7248,17 @@ Scrie o descriere pentru acest loc:`
           />
 
 
-          {
-            visits.map(
+          <ZoomAwareMarkers
 
-              (visit) => {
+            visits={
+              visits
+            }
 
+            renderPopup={
+              visitPopup
+            }
 
-                if (
-                  visit.is_peak
-                ) {
-
-                  return (
-
-                    <Marker
-
-                      key={
-                        visit.id
-                      }
-
-                      position={[
-                        Number(
-                          visit.latitude
-                        ),
-                        Number(
-                          visit.longitude
-                        )
-                      ]}
-
-                      icon={
-                        mountainIcon
-                      }
-
-                    >
-
-                      {
-                        visitPopup(
-                          visit
-                        )
-                      }
-
-                    </Marker>
-
-                  )
-
-                }
-
-
-                return (
-
-                  <Marker
-
-                    key={
-                      visit.id
-                    }
-
-                    position={[
-                      Number(
-                        visit.latitude
-                      ),
-                      Number(
-                        visit.longitude
-                      )
-                    ]}
-
-                  >
-
-                    {
-                      visitPopup(
-                        visit
-                      )
-                    }
-
-                  </Marker>
-
-                )
-
-              }
-
-            )
-          }
+          />
 
 
         </MapContainer>
@@ -5549,6 +7276,443 @@ Scrie o descriere pentru acest loc:`
                 visits
               }
             />
+
+          </div>
+
+        )
+      }
+
+
+      {/* =================================================
+          ALEGERE TIP LOCAȚIE
+      ================================================= */}
+
+      {
+        locationTypeModalOpen
+        &&
+        (
+
+          <div
+
+            style={{
+
+              position:
+                'fixed',
+
+              inset:
+                0,
+
+              zIndex:
+                100000,
+
+              display:
+                'flex',
+
+              alignItems:
+                'center',
+
+              justifyContent:
+                'center',
+
+              padding:
+                '20px',
+
+              background:
+                'rgba(0, 0, 0, 0.62)'
+
+            }}
+
+          >
+
+
+            <div
+
+              style={{
+
+                position:
+                  'relative',
+
+                width:
+                  'min(430px, 100%)',
+
+                padding:
+                  '24px',
+
+                borderRadius:
+                  '20px',
+
+                background:
+                  '#202326',
+
+                border:
+                  '1px solid rgba(255,255,255,0.12)',
+
+                boxShadow:
+                  '0 18px 60px rgba(0,0,0,0.45)',
+
+                color:
+                  '#ffffff'
+
+              }}
+
+            >
+
+
+              <button
+
+                type="button"
+
+                aria-label="Închide"
+
+                onClick={() =>
+                  resolveLocationType(
+                    null
+                  )
+                }
+
+                style={{
+
+                  position:
+                    'absolute',
+
+                  top:
+                    '10px',
+
+                  right:
+                    '12px',
+
+                  width:
+                    '32px',
+
+                  height:
+                    '32px',
+
+                  border:
+                    'none',
+
+                  borderRadius:
+                    '50%',
+
+                  background:
+                    'rgba(255,255,255,0.08)',
+
+                  color:
+                    '#ffffff',
+
+                  fontSize:
+                    '20px',
+
+                  cursor:
+                    'pointer'
+
+                }}
+
+              >
+
+                ×
+
+              </button>
+
+
+              <div
+
+                style={{
+
+                  marginBottom:
+                    '6px',
+
+                  fontSize:
+                    '12px',
+
+                  fontWeight:
+                    800,
+
+                  letterSpacing:
+                    '0.12em',
+
+                  textTransform:
+                    'uppercase',
+
+                  color:
+                    '#8ad2b2'
+
+                }}
+
+              >
+
+                PeakQuest
+
+              </div>
+
+
+              <h2
+
+                style={{
+
+                  margin:
+                    '0 0 8px',
+
+                  fontSize:
+                    '22px'
+
+                }}
+
+              >
+
+                Ce tip de locație ai vizitat?
+
+              </h2>
+
+
+              <p
+
+                style={{
+
+                  margin:
+                    '0 0 20px',
+
+                  color:
+                    '#b8c0c4',
+
+                  lineHeight:
+                    1.5
+
+                }}
+
+              >
+
+                Alege cum vrei să fie salvată fotografia pe hartă.
+
+              </p>
+
+
+              <div
+
+                style={{
+
+                  display:
+                    'grid',
+
+                  gridTemplateColumns:
+                    'repeat(auto-fit, minmax(160px, 1fr))',
+
+                  gap:
+                    '12px'
+
+                }}
+
+              >
+
+
+                <button
+
+                  type="button"
+
+                  onClick={() =>
+                    resolveLocationType(
+                      'peak'
+                    )
+                  }
+
+                  style={{
+
+                    minHeight:
+                      '118px',
+
+                    padding:
+                      '16px',
+
+                    border:
+                      '1px solid rgba(255,255,255,0.13)',
+
+                    borderRadius:
+                      '16px',
+
+                    background:
+                      '#2a2e31',
+
+                    color:
+                      '#ffffff',
+
+                    textAlign:
+                      'left',
+
+                    cursor:
+                      'pointer'
+
+                  }}
+
+                >
+
+                  <div
+
+                    style={{
+
+                      marginBottom:
+                        '10px',
+
+                      fontSize:
+                        '34px'
+
+                    }}
+
+                  >
+
+                    🏔️
+
+                  </div>
+
+
+                  <strong
+
+                    style={{
+
+                      display:
+                        'block',
+
+                      marginBottom:
+                        '5px',
+
+                      fontSize:
+                        '15px'
+
+                    }}
+
+                  >
+
+                    Este un vârf
+
+                  </strong>
+
+
+                  <span
+
+                    style={{
+
+                      color:
+                        '#aeb6ba',
+
+                      fontSize:
+                        '12px'
+
+                    }}
+
+                  >
+
+                    Intră la vârfurile vizitate și în statistici.
+
+                  </span>
+
+                </button>
+
+
+                <button
+
+                  type="button"
+
+                  onClick={() =>
+                    resolveLocationType(
+                      'place'
+                    )
+                  }
+
+                  style={{
+
+                    minHeight:
+                      '118px',
+
+                    padding:
+                      '16px',
+
+                    border:
+                      '1px solid rgba(255,255,255,0.13)',
+
+                    borderRadius:
+                      '16px',
+
+                    background:
+                      '#2a2e31',
+
+                    color:
+                      '#ffffff',
+
+                    textAlign:
+                      'left',
+
+                    cursor:
+                      'pointer'
+
+                  }}
+
+                >
+
+                  <div
+
+                    style={{
+
+                      marginBottom:
+                        '10px',
+
+                      fontSize:
+                        '34px'
+
+                    }}
+
+                  >
+
+                    📍
+
+                  </div>
+
+
+                  <strong
+
+                    style={{
+
+                      display:
+                        'block',
+
+                      marginBottom:
+                        '5px',
+
+                      fontSize:
+                        '15px'
+
+                    }}
+
+                  >
+
+                    Altă destinație
+
+                  </strong>
+
+
+                  <span
+
+                    style={{
+
+                      color:
+                        '#aeb6ba',
+
+                      fontSize:
+                        '12px'
+
+                    }}
+
+                  >
+
+                    Lac, cabană, traseu, belvedere sau alt loc vizitat.
+
+                  </span>
+
+                </button>
+
+
+              </div>
+
+
+            </div>
+
 
           </div>
 
