@@ -892,6 +892,35 @@ function App() {
     )
 
 
+  const [
+    visitDateModalOpen,
+    setVisitDateModalOpen
+  ] =
+    useState(
+      false
+    )
+
+
+  const [
+    visitDateValue,
+    setVisitDateValue
+  ] =
+    useState(
+      ''
+    )
+
+
+  const visitDateResolverRef =
+    useRef<
+      (
+        value:
+          string | null
+      ) => void
+    >(
+      null
+    )
+
+
   // ===================================================
   // AUTENTIFICARE
   // ===================================================
@@ -1078,7 +1107,7 @@ function App() {
 
         .order(
 
-          'created_at',
+          'visit_date',
 
           {
             ascending:
@@ -2784,11 +2813,11 @@ function App() {
   // obținem coordonatele sale.
   // ===================================================
 
-  async function searchPeakByName(
+  async function searchPeakCandidatesByName(
 
     peakName: string
 
-  ): Promise<PeakInfo | null> {
+  ): Promise<PeakInfo[]> {
 
     try {
 
@@ -2849,7 +2878,7 @@ function App() {
               'ro',
 
             limit:
-              '10',
+              '20',
 
             'accept-language':
               'ro'
@@ -2902,7 +2931,7 @@ function App() {
         0
       ) {
 
-        return null
+        return []
 
       }
 
@@ -2913,193 +2942,290 @@ function App() {
         )
 
 
-      const ranked =
-        allResults
+      const uniqueCandidates =
+        new Map<
+          string,
+          {
+            score: number
+            peak: PeakInfo
+          }
+        >()
 
-          .map(
+
+      for (
+        let index = 0;
+        index < allResults.length;
+        index++
+      ) {
+
+        const item =
+          allResults[
+            index
+          ]
+
+
+        const latitude =
+          Number.parseFloat(
+            item.lat
+          )
+
+
+        const longitude =
+          Number.parseFloat(
+            item.lon
+          )
+
+
+        if (
+          !Number.isFinite(
+            latitude
+          )
+          ||
+          !Number.isFinite(
+            longitude
+          )
+        ) {
+
+          continue
+
+        }
+
+
+        const detectedName =
+
+          item.name
+
+          ||
+
+          item.namedetails
+            ?.name
+
+          ||
+
+          item.display_name
+            ?.split(',')[0]
+
+          ||
+
+          cleanName
+
+
+        const normalizedDetected =
+          normalizePeakLookupName(
+            detectedName
+          )
+
+
+        const sameName =
+
+          normalizedDetected ===
+          normalizedRequested
+
+          ||
+
+          normalizedDetected.includes(
+            normalizedRequested
+          )
+
+          ||
+
+          normalizedRequested.includes(
+            normalizedDetected
+          )
+
+
+        /*
+          Pentru că fotografia NU are GPS, nu avem voie să
+          alegem automat primul rezultat doar după nume.
+
+          Păstrăm toate rezultatele plauzibile, în special
+          obiectele OSM de tip natural=peak.
+        */
+
+        const isPeakObject =
+
+          item.type ===
+          'peak'
+
+          ||
+
+          (
             (
-              item:
-                any,
-              index:
-                number
-            ) => {
+              item.category ===
+              'natural'
 
-              const latitude =
-                Number.parseFloat(
-                  item.lat
-                )
+              ||
 
+              item.class ===
+              'natural'
+            )
 
-              const longitude =
-                Number.parseFloat(
-                  item.lon
-                )
+            &&
+
+            sameName
+          )
 
 
-              if (
-                !Number.isFinite(
-                  latitude
-                )
-                ||
-                !Number.isFinite(
-                  longitude
-                )
-              ) {
+        if (
+          !sameName
+          &&
+          !isPeakObject
+        ) {
 
-                return null
+          continue
 
-              }
+        }
 
 
-              const detectedName =
-                item.name
-
-                ||
-
-                item.namedetails
-                  ?.name
-
-                ||
-
-                item.display_name
-                  ?.split(',')[0]
-
-                ||
-
-                cleanName
+        let score =
+          index
 
 
-              const normalizedDetected =
-                normalizePeakLookupName(
-                  detectedName
-                )
+        if (
+          normalizedDetected ===
+          normalizedRequested
+        ) {
+
+          score -=
+            600
+
+        }
+
+        else if (
+          sameName
+        ) {
+
+          score -=
+            300
+
+        }
 
 
-              let score =
-                index
+        if (
+          item.type ===
+          'peak'
+        ) {
+
+          score -=
+            800
+
+        }
 
 
-              if (
-                normalizedDetected ===
-                normalizedRequested
-              ) {
+        if (
+          item.category ===
+          'natural'
+          ||
+          item.class ===
+          'natural'
+        ) {
 
-                score -=
-                  500
+          score -=
+            200
 
-              }
-
-              else if (
-                normalizedDetected.includes(
-                  normalizedRequested
-                )
-                ||
-                normalizedRequested.includes(
-                  normalizedDetected
-                )
-              ) {
-
-                score -=
-                  250
-
-              }
+        }
 
 
-              if (
-                item.type ===
-                'peak'
-              ) {
+        const peak:
+          PeakInfo = {
 
-                score -=
-                  700
+          name:
+            detectedName,
 
-              }
+          elevation:
+            parseElevation(
+              item.extratags
+                ?.ele
+            ),
+
+          latitude,
+
+          longitude,
+
+          distance:
+            0,
+
+          mountainRange:
+
+            item.extratags
+              ?.['is_in:mountains']
+
+            ||
+
+            item.extratags
+              ?.['is_in:mountain_range']
+
+            ||
+
+            item.extratags
+              ?.mountain_range
+
+            ||
+
+            null
+
+        }
 
 
-              if (
-                item.category ===
-                'natural'
-                ||
-                item.class ===
-                'natural'
-              ) {
+        /*
+          Deduplicăm același vârf dacă apare în ambele
+          căutări Nominatim.
+        */
 
-                score -=
-                  200
-
-              }
+        const key =
+          `${latitude.toFixed(5)}|${longitude.toFixed(5)}`
 
 
-              return {
+        const existing =
+          uniqueCandidates.get(
+            key
+          )
 
-                score,
 
-                peak: {
+        if (
+          !existing
+          ||
+          score <
+          existing.score
+        ) {
 
-                  name:
-                    detectedName,
-
-                  elevation:
-                    parseElevation(
-                      item.extratags
-                        ?.ele
-                    ),
-
-                  latitude,
-
-                  longitude,
-
-                  distance:
-                    0,
-
-                  mountainRange:
-
-                    item.extratags
-                      ?.['is_in:mountains']
-
-                    ||
-
-                    item.extratags
-                      ?.['is_in:mountain_range']
-
-                    ||
-
-                    item.extratags
-                      ?.mountain_range
-
-                    ||
-
-                    null
-
-                } as PeakInfo
-
-              }
-
+          uniqueCandidates.set(
+            key,
+            {
+              score,
+              peak
             }
           )
 
-          .filter(
-            Boolean
-          )
+        }
 
-          .sort(
-            (
-              a:
-                any,
-              b:
-                any
-            ) =>
-              a.score -
-              b.score
-          )
+      }
 
 
-      return (
-        ranked[0]
-          ?.peak
-        ??
-        null
+      return Array.from(
+        uniqueCandidates.values()
       )
+
+        .sort(
+          (
+            a,
+            b
+          ) =>
+            a.score -
+            b.score
+        )
+
+        .slice(
+          0,
+          8
+        )
+
+        .map(
+          (
+            item
+          ) =>
+            item.peak
+        )
 
     }
 
@@ -3108,12 +3234,12 @@ function App() {
     ) {
 
       console.log(
-        'Eroare căutare vârf după nume:',
+        'Eroare căutare vârfuri după nume:',
         error
       )
 
 
-      return null
+      return []
 
     }
 
@@ -3149,81 +3275,377 @@ function App() {
 
 
     setStatus(
-      `🔎 Caut ${cleanName}...`
+      `🔎 Caut toate vârfurile numite ${cleanName}...`
     )
 
 
     /*
-      1. Încercăm Nominatim pentru coordonatele vârfului.
+      FĂRĂ GPS nu alegem niciodată automat primul rezultat
+      doar pentru că are același nume.
+
+      Exemplu generic:
+      "Capra" poate exista în mai multe masive.
     */
 
-    const nominatimPeak =
-      await searchPeakByName(
+    const candidates =
+      await searchPeakCandidatesByName(
         cleanName
       )
 
 
-    /*
-      2. Wikidata este folosit pentru metadatele vârfului:
-         altitudine, masiv și, dacă este nevoie, coordonate.
-    */
+    // =================================================
+    // FALLBACK: NU AM GĂSIT CANDIDAȚI OSM
+    // =================================================
 
-    const wikidata =
-      await getPeakMetadataFromWikidata(
+    if (
+      candidates.length ===
+      0
+    ) {
 
-        cleanName,
+      const wikidata =
+        await getPeakMetadataFromWikidata(
 
-        nominatimPeak
-          ?.latitude
+          cleanName,
+
+          null,
+
+          null
+
+        )
+
+
+      if (
+        wikidata.latitude ===
+        null
+        ||
+        wikidata.longitude ===
+        null
+      ) {
+
+        return null
+
+      }
+
+
+      const location =
+        await getReverseLocation(
+
+          wikidata.latitude,
+
+          wikidata.longitude
+
+        )
+
+
+      let elevation =
+        wikidata.elevation
+
+
+      if (
+        elevation ===
+        null
+      ) {
+
+        elevation =
+          await getTerrainElevation(
+
+            wikidata.latitude,
+
+            wikidata.longitude
+
+          )
+
+      }
+
+
+      let mountainRange =
+        wikidata.mountainRange
         ??
-        null,
-
-        nominatimPeak
-          ?.longitude
+        location.mountainRange
         ??
         null
 
+
+      if (
+        !mountainRange
+      ) {
+
+        mountainRange =
+          await getNearbyMountainRangeFromWikidata(
+
+            wikidata.latitude,
+
+            wikidata.longitude
+
+          )
+
+      }
+
+
+      return {
+
+        peak: {
+
+          name:
+            wikidata.name
+            ??
+            cleanName,
+
+          elevation,
+
+          latitude:
+            wikidata.latitude,
+
+          longitude:
+            wikidata.longitude,
+
+          distance:
+            0,
+
+          mountainRange
+
+        },
+
+        location
+
+      }
+
+    }
+
+
+    // =================================================
+    // COMPLETĂM FIECARE CANDIDAT
+    // =================================================
+    //
+    // Pentru fiecare vârf cu același nume aflăm:
+    // - altitudinea
+    // - masivul
+    // - localitatea / zona
+    //
+    // Abia apoi utilizatorul alege varianta corectă.
+    // =================================================
+
+    const enrichedCandidates =
+      await Promise.all(
+
+        candidates.map(
+
+          async (
+            candidate
+          ) => {
+
+            const location =
+              await getReverseLocation(
+
+                candidate.latitude,
+
+                candidate.longitude
+
+              )
+
+
+            const wikidata =
+              await getPeakMetadataFromWikidata(
+
+                cleanName,
+
+                candidate.latitude,
+
+                candidate.longitude
+
+              )
+
+
+            let elevation =
+
+              candidate.elevation
+
+              ??
+
+              wikidata.elevation
+
+
+            if (
+              elevation ===
+              null
+            ) {
+
+              elevation =
+                await getTerrainElevation(
+
+                  candidate.latitude,
+
+                  candidate.longitude
+
+                )
+
+            }
+
+
+            let mountainRange =
+
+              wikidata.mountainRange
+
+              ??
+
+              candidate.mountainRange
+
+              ??
+
+              location.mountainRange
+
+              ??
+
+              null
+
+
+            if (
+              !mountainRange
+            ) {
+
+              mountainRange =
+                await getNearbyMountainRangeFromWikidata(
+
+                  candidate.latitude,
+
+                  candidate.longitude
+
+                )
+
+            }
+
+
+            return {
+
+              peak: {
+
+                ...candidate,
+
+                elevation,
+
+                mountainRange
+
+              },
+
+              location
+
+            }
+
+          }
+
+        )
+
       )
-
-
-    const latitude =
-
-      nominatimPeak
-        ?.latitude
-
-      ??
-
-      wikidata.latitude
-
-
-    const longitude =
-
-      nominatimPeak
-        ?.longitude
-
-      ??
-
-      wikidata.longitude
 
 
     /*
-      Fără coordonate nu putem pune markerul pe hartă.
+      Dacă există un singur rezultat, îl putem folosi direct.
     */
 
     if (
-      latitude ===
-      null
-      ||
-      longitude ===
-      null
-      ||
-      !Number.isFinite(
-        latitude
+      enrichedCandidates.length ===
+      1
+    ) {
+
+      return enrichedCandidates[0]
+
+    }
+
+
+    // =================================================
+    // MAI MULTE VÂRFURI CU ACELAȘI NUME
+    // =================================================
+
+    const candidateList =
+      enrichedCandidates
+
+        .map(
+          (
+            candidate,
+            index
+          ) => {
+
+            const elevationText =
+
+              candidate
+                .peak
+                .elevation !==
+              null
+
+                ? `${candidate.peak.elevation} m`
+
+                : 'altitudine necunoscută'
+
+
+            const rangeText =
+
+              candidate
+                .peak
+                .mountainRange
+
+              ||
+
+              'masiv nedetectat'
+
+
+            /*
+              Pentru dezambiguizare afișăm și o parte din
+              locația administrativă.
+            */
+
+            const locationText =
+              candidate
+                .location
+                .displayName
+
+                .split(',')
+
+                .slice(
+                  0,
+                  4
+                )
+
+                .join(',')
+
+                .trim()
+
+
+            return (
+              `${
+                index + 1
+              }. ${
+                candidate.peak.name
+              }\n   ${rangeText} • ${elevationText}\n   ${locationText}`
+            )
+
+          }
+        )
+
+        .join(
+          '\n\n'
+        )
+
+
+    const selected =
+      window.prompt(
+
+`🏔️ Am găsit mai multe vârfuri cu numele:
+
+${cleanName}
+
+Alege varianta corectă scriind NUMĂRUL:
+
+${candidateList}
+
+Exemplu:
+1`
+
       )
-      ||
-      !Number.isFinite(
-        longitude
-      )
+
+
+    if (
+      selected ===
+      null
     ) {
 
       return null
@@ -3231,126 +3653,40 @@ function App() {
     }
 
 
-    /*
-      3. Folosim coordonatele vârfului pentru locația
-         administrativă / traseu, exact cum facem și
-         pentru fotografiile cu GPS.
-    */
+    const selectedIndex =
+      Number.parseInt(
+        selected.trim(),
+        10
+      )
+      -
+      1
 
-    const location =
-      await getReverseLocation(
 
-        latitude,
+    if (
+      !Number.isInteger(
+        selectedIndex
+      )
+      ||
+      selectedIndex <
+      0
+      ||
+      selectedIndex >=
+      enrichedCandidates.length
+    ) {
 
-        longitude
-
+      alert(
+        'Alegerea nu este validă. Încearcă din nou și scrie numărul variantei corecte.'
       )
 
 
-    let elevation =
-
-      nominatimPeak
-        ?.elevation
-
-      ??
-
-      wikidata.elevation
-
-
-    /*
-      4. Dacă nici OSM/Nominatim, nici Wikidata nu au
-         altitudinea, folosim modelul digital de teren
-         la coordonatele EXACTE ale vârfului.
-    */
-
-    if (
-      elevation ===
-      null
-    ) {
-
-      elevation =
-        await getTerrainElevation(
-
-          latitude,
-
-          longitude
-
-        )
+      return null
 
     }
 
 
-    let mountainRange =
-
-      wikidata.mountainRange
-
-      ??
-
-      nominatimPeak
-        ?.mountainRange
-
-      ??
-
-      location.mountainRange
-
-      ??
-
-      null
-
-
-    if (
-      !mountainRange
-    ) {
-
-      mountainRange =
-        await getNearbyMountainRangeFromWikidata(
-
-          latitude,
-
-          longitude
-
-        )
-
-    }
-
-
-    const detectedName =
-
-      nominatimPeak
-        ?.name
-
-      ??
-
-      wikidata.name
-
-      ??
-
-      cleanName
-
-
-    return {
-
-      peak: {
-
-        name:
-          detectedName,
-
-        elevation,
-
-        latitude,
-
-        longitude,
-
-        distance:
-          0,
-
-        mountainRange
-
-      },
-
-      location
-
-    }
+    return enrichedCandidates[
+      selectedIndex
+    ]
 
   }
 
@@ -4578,6 +4914,265 @@ LIMIT 25
 
 
   // ===================================================
+  // DATA VIZITEI
+  // ===================================================
+  //
+  // visit_date = data reală a drumeției
+  // created_at = data la care fotografia este încărcată
+  //
+  // Încercăm să citim automat data fotografiei din EXIF.
+  // Utilizatorul o poate confirma sau modifica înainte
+  // ca fotografia să fie salvată.
+  // ===================================================
+
+  function getTodayInputDate() {
+
+    const today =
+      new Date()
+
+
+    const year =
+      today.getFullYear()
+
+
+    const month =
+      String(
+        today.getMonth() + 1
+      ).padStart(
+        2,
+        '0'
+      )
+
+
+    const day =
+      String(
+        today.getDate()
+      ).padStart(
+        2,
+        '0'
+      )
+
+
+    return `${year}-${month}-${day}`
+
+  }
+
+
+  function dateToInputValue(
+    date: Date
+  ) {
+
+    if (
+      Number.isNaN(
+        date.getTime()
+      )
+    ) {
+
+      return null
+
+    }
+
+
+    const year =
+      date.getFullYear()
+
+
+    const month =
+      String(
+        date.getMonth() + 1
+      ).padStart(
+        2,
+        '0'
+      )
+
+
+    const day =
+      String(
+        date.getDate()
+      ).padStart(
+        2,
+        '0'
+      )
+
+
+    return `${year}-${month}-${day}`
+
+  }
+
+
+  async function getPhotoVisitDate(
+    file: File
+  ): Promise<string | null> {
+
+    try {
+
+      const metadata =
+        await exifr.parse(
+          file,
+          [
+            'DateTimeOriginal',
+            'CreateDate',
+            'ModifyDate'
+          ]
+        )
+
+
+      const rawDate =
+        metadata?.DateTimeOriginal
+        ??
+        metadata?.CreateDate
+        ??
+        metadata?.ModifyDate
+        ??
+        null
+
+
+      if (
+        !rawDate
+      ) {
+
+        return null
+
+      }
+
+
+      const date =
+        rawDate instanceof Date
+          ? rawDate
+          : new Date(
+              rawDate
+            )
+
+
+      return dateToInputValue(
+        date
+      )
+
+    }
+
+    catch (
+      error
+    ) {
+
+      console.log(
+        'Nu am putut citi data EXIF:',
+        error
+      )
+
+
+      return null
+
+    }
+
+  }
+
+
+  function askVisitDate(
+    defaultValue: string
+  ) {
+
+    return new Promise<
+      string | null
+    >(
+      (
+        resolve
+      ) => {
+
+        visitDateResolverRef.current =
+          resolve
+
+
+        setVisitDateValue(
+          defaultValue
+        )
+
+
+        setVisitDateModalOpen(
+          true
+        )
+
+      }
+    )
+
+  }
+
+
+  function resolveVisitDate(
+    value: string | null
+  ) {
+
+    if (
+      value !== null
+      &&
+      !value
+    ) {
+
+      alert(
+        'Alege data vizitei.'
+      )
+
+
+      return
+
+    }
+
+
+    setVisitDateModalOpen(
+      false
+    )
+
+
+    const resolver =
+      visitDateResolverRef.current
+
+
+    visitDateResolverRef.current =
+      null
+
+
+    resolver?.(
+      value
+    )
+
+  }
+
+
+  function formatVisitDate(
+    value:
+      string | null | undefined
+  ) {
+
+    if (
+      !value
+    ) {
+
+      return 'necunoscută'
+
+    }
+
+
+    const parts =
+      value
+        .split(
+          '-'
+        )
+
+
+    if (
+      parts.length !== 3
+    ) {
+
+      return value
+
+    }
+
+
+    return `${parts[2]}.${parts[1]}.${parts[0]}`
+
+  }
+
+
+  // ===================================================
   // ADĂUGARE FOTOGRAFIE
   // ===================================================
 
@@ -4597,10 +5192,46 @@ LIMIT 25
 
     try {
 
-      const gps =
-        await exifr.gps(
-          file
+      const [
+        gps,
+        exifVisitDate
+      ] =
+        await Promise.all([
+
+          exifr.gps(
+            file
+          ),
+
+          getPhotoVisitDate(
+            file
+          )
+
+        ])
+
+
+      const visitDate =
+        await askVisitDate(
+
+          exifVisitDate
+          ??
+          getTodayInputDate()
+
         )
+
+
+      if (
+        visitDate ===
+        null
+      ) {
+
+        setStatus(
+          ''
+        )
+
+
+        return
+
+      }
 
 
       if (!gps) {
@@ -4851,12 +5482,7 @@ Scrie o descriere pentru această fotografie:`
                   imagePath,
 
                 visit_date:
-
-                  new Date()
-
-                    .toISOString()
-
-                    .split('T')[0]
+                  visitDate
 
               })
 
@@ -5111,12 +5737,7 @@ Scrie o descriere pentru această fotografie:`
                 imagePath,
 
               visit_date:
-
-                new Date()
-
-                  .toISOString()
-
-                  .split('T')[0]
+                  visitDate
 
             })
 
@@ -5708,12 +6329,7 @@ Scrie o descriere pentru acest loc:`
               imagePath,
 
             visit_date:
-
-              new Date()
-
-                .toISOString()
-
-                .split('T')[0]
+                  visitDate
 
           })
 
@@ -6357,7 +6973,9 @@ Scrie o descriere pentru acest loc:`
 
 
             {
-              visit.visit_date
+              formatVisitDate(
+                visit.visit_date
+              )
             }
 
 
@@ -7276,6 +7894,325 @@ Scrie o descriere pentru acest loc:`
                 visits
               }
             />
+
+          </div>
+
+        )
+      }
+
+
+      {/* =================================================
+          DATA VIZITEI
+      ================================================= */}
+
+      {
+        visitDateModalOpen
+        &&
+        (
+
+          <div
+
+            style={{
+
+              position:
+                'fixed',
+
+              inset:
+                0,
+
+              zIndex:
+                100001,
+
+              display:
+                'flex',
+
+              alignItems:
+                'center',
+
+              justifyContent:
+                'center',
+
+              padding:
+                '20px',
+
+              background:
+                'rgba(0, 0, 0, 0.62)'
+
+            }}
+
+          >
+
+
+            <div
+
+              style={{
+
+                position:
+                  'relative',
+
+                width:
+                  'min(430px, 100%)',
+
+                padding:
+                  '24px',
+
+                borderRadius:
+                  '20px',
+
+                background:
+                  '#202326',
+
+                border:
+                  '1px solid rgba(255,255,255,0.12)',
+
+                boxShadow:
+                  '0 18px 60px rgba(0,0,0,0.45)',
+
+                color:
+                  '#ffffff'
+
+              }}
+
+            >
+
+
+              <button
+
+                type="button"
+
+                aria-label="Închide"
+
+                onClick={() =>
+                  resolveVisitDate(
+                    null
+                  )
+                }
+
+                style={{
+
+                  position:
+                    'absolute',
+
+                  top:
+                    '10px',
+
+                  right:
+                    '12px',
+
+                  width:
+                    '32px',
+
+                  height:
+                    '32px',
+
+                  border:
+                    'none',
+
+                  borderRadius:
+                    '50%',
+
+                  background:
+                    'rgba(255,255,255,0.08)',
+
+                  color:
+                    '#ffffff',
+
+                  fontSize:
+                    '20px',
+
+                  cursor:
+                    'pointer'
+
+                }}
+
+              >
+
+                ×
+
+              </button>
+
+
+              <div
+
+                style={{
+
+                  marginBottom:
+                    '6px',
+
+                  fontSize:
+                    '12px',
+
+                  fontWeight:
+                    800,
+
+                  letterSpacing:
+                    '0.12em',
+
+                  textTransform:
+                    'uppercase',
+
+                  color:
+                    '#8ad2b2'
+
+                }}
+
+              >
+
+                PeakQuest
+
+              </div>
+
+
+              <h2
+
+                style={{
+
+                  margin:
+                    '0 0 8px',
+
+                  fontSize:
+                    '22px'
+
+                }}
+
+              >
+
+                Data vizitei
+
+              </h2>
+
+
+              <p
+
+                style={{
+
+                  margin:
+                    '0 0 18px',
+
+                  color:
+                    '#b8c0c4',
+
+                  lineHeight:
+                    1.5
+
+                }}
+
+              >
+
+                Alege ziua, luna și anul în care ai făcut drumeția.
+                Dacă fotografia conține data în EXIF, câmpul este completat automat.
+
+              </p>
+
+
+              <input
+
+                type="date"
+
+                value={
+                  visitDateValue
+                }
+
+                max={
+                  getTodayInputDate()
+                }
+
+                onChange={(e) =>
+                  setVisitDateValue(
+                    e.target.value
+                  )
+                }
+
+                style={{
+
+                  width:
+                    '100%',
+
+                  boxSizing:
+                    'border-box',
+
+                  marginBottom:
+                    '18px',
+
+                  padding:
+                    '13px 14px',
+
+                  borderRadius:
+                    '12px',
+
+                  border:
+                    '1px solid rgba(255,255,255,0.16)',
+
+                  background:
+                    '#151719',
+
+                  color:
+                    '#ffffff',
+
+                  fontSize:
+                    '16px',
+
+                  outline:
+                    'none',
+
+                  colorScheme:
+                    'dark'
+
+                }}
+
+              />
+
+
+              <button
+
+                type="button"
+
+                onClick={() =>
+                  resolveVisitDate(
+                    visitDateValue
+                  )
+                }
+
+                style={{
+
+                  width:
+                    '100%',
+
+                  padding:
+                    '13px 16px',
+
+                  border:
+                    'none',
+
+                  borderRadius:
+                    '12px',
+
+                  background:
+                    '#7fc8a9',
+
+                  color:
+                    '#111614',
+
+                  fontSize:
+                    '15px',
+
+                  fontWeight:
+                    800,
+
+                  cursor:
+                    'pointer'
+
+                }}
+
+              >
+
+                Continuă
+
+              </button>
+
+
+            </div>
+
 
           </div>
 
